@@ -143,7 +143,7 @@
   function vHistory() {
     var trs = S.txs.map(txRow).join('') || '<p class="empty">No transactions yet.</p>';
     return '<section class="screen">' + status +
-      '<div class="hd"><button class="circ" data-act="go" data-v="home" aria-label="Back">' + ic('back') + '</button><h4>Activity</h4><span></span></div>' + trs + '</section>' + dock('history');
+      '<div class="hd"><button class="circ" data-act="go" data-v="home" aria-label="Back">' + ic('back') + '</button><h4>Activity</h4><button class="copy" data-act="statement">Export</button></div><label class="field" style="margin:8px 0 14px">Search transactions<input data-search type="search" placeholder="Search activity"></label>' + trs + '</section>' + dock('history');
   }
   function vCard() {
     var me = S.me, c = me.card;
@@ -161,7 +161,7 @@
       '<button class="act" data-act="addfunds"><i>' + ic('plus') + '</i>Add Money</button>' +
       '<button class="act" data-act="freeze" aria-pressed="' + c.frozen + '"><i>' + ic('snow') + '</i>' + (c.frozen ? 'Unfreeze' : 'Freeze') + '</button>' +
       '<button class="act" data-act="sheet" data-s="profile"><i>' + ic('dots') + '</i>More</button></div>' +
-      '<div class="sub">Upcoming subscription</div><div class="subrow">No subscriptions set up yet.</div>' +
+
       '<div class="trh"><b>Recent Transactions</b><button data-act="go" data-v="history">View all</button></div>' + outs +
       '</section>' + dock('card');
   }
@@ -281,7 +281,7 @@
       (navigator.clipboard ? navigator.clipboard.writeText(n) : Promise.reject()).then(function () { toast('Account number copied'); }, function () { toast('Account number: ' + n); });
       return;
     }
-    if (a === 'addfunds') return openSheet('fund');
+    if (a === 'addfunds') return openSheet('fund');\n    if (a === 'statement') { var rows = [['Date','Type','Description','Amount USD','Balance USD']].concat(S.txs.map(function (t) { return [new Date(t.created_at).toISOString(),t.type,t.counterparty,(t.amount/100).toFixed(2),(t.balance_after/100).toFixed(2)]; })); var csv = rows.map(function (row) { return row.map(function (v) { return '"' + String(v).replace(/"/g,'""') + '"'; }).join(','); }).join('\\r\\n'); var blob = new Blob([csv],{type:'text/csv;charset=utf-8'}), url = URL.createObjectURL(blob), link = document.createElement('a'); link.href=url; link.download='prime-trust-statement.csv'; link.click(); URL.revokeObjectURL(url); toast('Statement exported'); return; }
     if (a === 'testfunds') {
       api('POST', '/api/deposit', { amount: 500 }, uuid()).then(function () { return done('USD 500.00 test funds added'); }).catch(function (e) { toast(e.message); });
       return;
