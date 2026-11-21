@@ -234,7 +234,8 @@
     switch (S.view) {
       case 'login': html = vAuth('login'); break;
       case 'register': html = vAuth('register'); break;
-      case 'verification': html = vVerification(); break;\n      case 'home': html = vHome(); break;
+      case 'verification': html = vVerification(); break;
+      case 'home': html = vHome(); break;
       case 'history': html = vHistory(); break;
       case 'card': html = vCard(); break;
       default: html = vWelcome();
@@ -308,7 +309,8 @@
     setErr(form, ''); busy(form, true);
     var p;
     if (kind === 'login') p = api('POST', '/api/auth/login', { email: d.email, password: d.password });
-    else if (kind === 'register') p = api('POST', '/api/auth/register', d);\n    else if (kind === 'verification') p = api('POST', '/api/verification/submit', d);
+    else if (kind === 'register') p = api('POST', '/api/auth/register', d);
+    else if (kind === 'verification') p = api('POST', '/api/verification/submit', d);
     else if (kind === 'send') p = api('POST', '/api/transfers', { to_account: d.to_account, amount: d.amount, pin: d.pin, note: d.note }, S.idem);
     else if (kind === 'airtime') p = api('POST', '/api/airtime', { network: d.network, phone: d.phone, amount: d.amount, pin: d.pin }, S.idem);
     else if (kind === 'bills') p = api('POST', '/api/bills', { biller: d.biller, reference: d.reference, amount: d.amount, pin: d.pin }, S.idem);
