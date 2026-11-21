@@ -71,6 +71,21 @@ function issueSession(res, userId) {
   });
 }
 
+function adminAuth(req, res, next) {
+  try {
+    const payload = jwt.verify(req.cookies.ptb_admin || '', JWT_SECRET);
+    if (payload.admin !== true) throw new Error('not admin');
+    req.admin = payload;
+    next();
+  } catch { fail(res, 401, 'Administrator sign-in required.'); }
+}
+function requireVerified(req, res, next) {
+  if (!req.user || req.user.verification_status !== 'approved') {
+    return fail(res, 403, 'Your identity verification must be approved by an administrator before banking actions are enabled.');
+  }
+  next();
+}
+
 function auth(req, res, next) {
   try {
     const { uid } = jwt.verify(req.cookies.ptb_session || '', JWT_SECRET);
@@ -150,6 +165,66 @@ const shapeTx = (t) => ({ id: t.id, type: t.type, amount: t.amount, balance_afte
   counterparty: t.counterparty, note: cleanNote(t.note), created_at: t.created_at });
 
 // ---------- auth routes ----------
+app.post('/api/admin/login', authLimiter, wrap((req, res) => {
+  const email = String((req.body || {}).email || '').trim().toLowerCase();
+  const password = String((req.body || {}).password || '');
+  const adminEmail = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+  const adminPassword = String(process.env.ADMIN_PASSWORD || '');
+  if (!adminEmail || !adminPassword) throw httpErr(503, 'Admin access is not configured. Set ADMIN_EMAIL and ADMIN_PASSWORD.');
+  const a = Buffer.from(email), b = Buffer.from(adminEmail);
+  const p = Buffer.from(password), q = Buffer.from(adminPassword);
+  const emailOk = a.length === b.length && crypto.timingSafeEqual(a, b);
+  const passOk = p.length === q.length && crypto.timingSafeEqual(p, q);
+  if (!emailOk || !passOk) throw httpErr(401, 'Email or password is incorrect.');
+  const token = jwt.sign({ admin: true, email: adminEmail }, JWT_SECRET, { expiresIn: '4h' });
+  res.cookie('ptb_admin', token, { httpOnly: true, sameSite: 'strict', secure: PROD, maxAge: 4 * 3600 * 1000, path: '/api' });
+  res.json({ ok: true });
+}));
+app.post('/api/admin/logout', adminAuth, (req, res) => { res.clearCookie('ptb_admin', { path: '/api' }); res.json({ ok: true }); });
+app.get('/api/admin/requests', adminAuth, wrap((req, res) => {
+  const rows = db.prepare(`SELECT vr.id, vr.user_id, vr.legal_name, vr.date_of_birth, vr.address, vr.id_type,
+    vr.review_status, vr.admin_note, vr.submitted_at, u.email, u.full_name
+    FROM verification_requests vr JOIN users u ON u.id = vr.user_id
+    WHERE vr.review_status = 'submitted' ORDER BY vr.submitted_at ASC LIMIT 100`).all();
+  res.json({ requests: rows });
+}));
+app.post('/api/admin/requests/:id/review', adminAuth, wrap((req, res) => {
+  const id = Number(req.params.id);
+  const decision = String((req.body || {}).decision || '');
+  const note = String((req.body || {}).note || '').trim().slice(0, 300);
+  if (!Number.isSafeInteger(id) || id < 1 || !['approved','rejected'].includes(decision)) throw httpErr(400, 'Invalid review decision.');
+  const request = db.prepare('SELECT * FROM verification_requests WHERE id = ?').get(id);
+  if (!request || request.review_status !== 'submitted') throw httpErr(404, 'Pending verification request not found.');
+  db.transaction(() => {
+    db.prepare('UPDATE verification_requests SET review_status = ?, admin_note = ?, reviewed_at = ? WHERE id = ?')
+      .run(decision, note || null, now(), id);
+    db.prepare('UPDATE users SET verification_status = ? WHERE id = ?').run(decision, request.user_id);
+  })();
+  res.json({ ok: true, status: decision });
+}));
+
+app.post('/api/verification/submit', auth, wrap((req, res) => {
+  const b = req.body || {};
+  const legalName = String(b.legal_name || '').trim();
+  const dob = String(b.date_of_birth || '').trim();
+  const address = String(b.address || '').trim();
+  const idType = String(b.id_type || '').trim();
+  if (legalName.length < 2 || legalName.length > 100) throw httpErr(400, 'Enter your legal name.');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || Number.isNaN(Date.parse(dob))) throw httpErr(400, 'Enter a valid date of birth.');
+  if (address.length < 8 || address.length > 250) throw httpErr(400, 'Enter your residential address.');
+  if (!['Passport','Driver license','National identity card','Other government ID'].includes(idType)) throw httpErr(400, 'Choose a valid ID type.');
+  const t = now();
+  db.transaction(() => {
+    db.prepare(`INSERT INTO verification_requests (user_id, legal_name, date_of_birth, address, id_type, review_status, submitted_at)
+      VALUES (?,?,?,?,?,'submitted',?)
+      ON CONFLICT(user_id) DO UPDATE SET legal_name=excluded.legal_name, date_of_birth=excluded.date_of_birth,
+      address=excluded.address, id_type=excluded.id_type, review_status='submitted', admin_note=NULL, submitted_at=excluded.submitted_at, reviewed_at=NULL`)
+      .run(req.user.id, legalName, dob, address, idType, t);
+    db.prepare("UPDATE users SET verification_status='submitted', verification_submitted_at=? WHERE id=?").run(t, req.user.id);
+  })();
+  res.json({ ok: true, verification_status: 'submitted' });
+}));
+
 app.post('/api/auth/register', authLimiter, wrap((req, res) => {
   const { email, password, full_name, pin } = req.body || {};
   const em = String(email || '').trim().toLowerCase();
@@ -199,7 +274,7 @@ app.post('/api/auth/logout', (req, res) => { res.clearCookie('ptb_session', { pa
 app.get('/api/me', auth, wrap((req, res) => {
   const card = db.prepare('SELECT last4, expiry, frozen FROM cards WHERE account_id = ?').get(req.account.id);
   res.json({
-    name: req.user.full_name, email: req.user.email,
+    name: req.user.full_name, email: req.user.email, verification_status: req.user.verification_status,
     account: { number: req.account.account_number, currency: req.account.currency, balance: req.account.balance },
     card: { last4: card.last4, expiry: card.expiry, frozen: !!card.frozen },
     sandbox_funding: SANDBOX_FUNDING
@@ -237,7 +312,7 @@ app.get('/api/accounts/lookup/:number', auth, moneyLimiter, wrap((req, res) => {
   res.json({ name: row.full_name, account_number: n });
 }));
 
-app.post('/api/transfers', auth, moneyLimiter, wrap((req, res) => {
+app.post('/api/transfers', auth, requireVerified, moneyLimiter, wrap((req, res) => {
   idempotent(req, res, () => {
     const { to_account, amount, pin, note } = req.body || {};
     const amt = cents(amount);
@@ -263,7 +338,7 @@ app.post('/api/transfers', auth, moneyLimiter, wrap((req, res) => {
 const BILLERS = ['Electricity', 'Cable TV', 'Internet', 'Water', 'School fees'];
 const NETWORKS = ['MTN', 'Airtel', 'Glo', '9mobile'];
 
-app.post('/api/airtime', auth, moneyLimiter, wrap((req, res) => {
+app.post('/api/airtime', auth, requireVerified, moneyLimiter, wrap((req, res) => {
   idempotent(req, res, () => {
     const { network, phone, amount, pin } = req.body || {};
     const amt = cents(amount);
@@ -280,7 +355,7 @@ app.post('/api/airtime', auth, moneyLimiter, wrap((req, res) => {
   });
 }));
 
-app.post('/api/bills', auth, moneyLimiter, wrap((req, res) => {
+app.post('/api/bills', auth, requireVerified, moneyLimiter, wrap((req, res) => {
   idempotent(req, res, () => {
     const { biller, reference, amount, pin } = req.body || {};
     const amt = cents(amount);
@@ -298,7 +373,7 @@ app.post('/api/bills', auth, moneyLimiter, wrap((req, res) => {
 }));
 
 // Sandbox only: credits play money from a system account. Turn off with ALLOW_SANDBOX_FUNDING=false.
-app.post('/api/deposit', auth, moneyLimiter, wrap((req, res) => {
+app.post('/api/deposit', auth, requireVerified, moneyLimiter, wrap((req, res) => {
   if (!SANDBOX_FUNDING) throw httpErr(403, 'Funding is disabled.');
   idempotent(req, res, () => {
     const amt = cents((req.body || {}).amount);
@@ -316,7 +391,7 @@ app.post('/api/deposit', auth, moneyLimiter, wrap((req, res) => {
   });
 }));
 
-app.post('/api/card/freeze', auth, wrap((req, res) => {
+app.post('/api/card/freeze', auth, requireVerified, wrap((req, res) => {
   const frozen = (req.body || {}).frozen ? 1 : 0;
   db.prepare('UPDATE cards SET frozen = ? WHERE account_id = ?').run(frozen, req.account.id);
   res.json({ ok: true, frozen: !!frozen });
