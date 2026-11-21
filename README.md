@@ -54,3 +54,17 @@ npm test           # API smoke test on a throwaway database
 ## Before this could ever handle real money
 
 This is a learning and portfolio project. Real banking needs, at minimum: a banking licence or a licensed partner (for example a BaaS provider), KYC/AML checks, a real payments rail for deposits and withdrawals, 2FA and device checks, audit logging, backups, and a security review. Swapping SQLite for Postgres is also advisable for production.
+
+
+## Administrator identity review
+
+New customer accounts begin in **Pending verification**. Customers submit their legal name, date of birth, residential address and government ID type. A bank administrator manually checks the submission and approves or rejects it from `/admin.html`. Banking actions are server-side blocked until approval; the customer cannot approve their own identity.
+
+Configure these environment variables before using the admin portal:
+
+- `ADMIN_EMAIL` — the authorized administrator email
+- `ADMIN_PASSWORD` — a strong, unique administrator password
+- `JWT_SECRET` — a long random secret (required in production)
+- `ALLOW_SANDBOX_FUNDING=false` — disable demo/test balance deposits in production
+
+The demo collects no SSN or ITIN and does not ask customers to enter a full government ID number in the form. For a production bank, connect the review workflow to an approved, secure document verification process and configure a private admin account. Do not use this demo ledger as a real bank or store actual customer funds.
