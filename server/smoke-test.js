@@ -1,6 +1,6 @@
 // End-to-end API check on a throwaway database. Run: npm test
 process.env.DB_PATH = require('path').join(require('os').tmpdir(), 'ptb-test-' + Date.now() + '.db');
-process.env.NODE_ENV = 'test';
+process.env.NODE_ENV = 'test';\nprocess.env.ADMIN_EMAIL = 'admin@primetrust.test';\nprocess.env.ADMIN_PASSWORD = 'test-admin-password';
 const assert = require('assert');
 const app = require('./index');
 
@@ -21,13 +21,29 @@ function client() {
 }
 
 (async () => {
-  const a = client(), b = client();
+  const a = client(), b = client(), admin = client();
   let r;
 
   r = await a('POST', '/api/auth/register', { email: 'ada@example.com', full_name: 'Ada Okafor', password: 'longpassword1', pin: '1234' });
   assert.equal(r.status, 201, 'register a');
   r = await b('POST', '/api/auth/register', { email: 'tolu@example.com', full_name: 'Tolu Bello', password: 'longpassword2', pin: '4321' });
   assert.equal(r.status, 201, 'register b');
+  // Identity review is required before any banking action.
+  r = await a('POST', '/api/deposit', { amount: 20 });
+  assert.equal(r.status, 403, 'pending user cannot use banking actions');
+  const verification = { legal_name: 'Ada Okafor', date_of_birth: '1995-05-12', address: '12 Example Street, Lagos, Nigeria', id_type: 'Passport' };
+  r = await a('POST', '/api/verification/submit', verification);
+  assert.equal(r.status, 200, 'submit identity for review');
+  r = await b('POST', '/api/verification/submit', { ...verification, legal_name: 'Tolu Bello' });
+  assert.equal(r.status, 200, 'submit second identity');
+  r = await admin('POST', '/api/admin/login', { email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD });
+  assert.equal(r.status, 200, 'administrator login');
+  const pending = (await admin('GET', '/api/admin/requests')).body.requests;
+  assert.equal(pending.length, 2, 'admin sees pending requests');
+  for (const request of pending) {
+    r = await admin('POST', '/api/admin/requests/' + request.id + '/review', { decision: 'approved', note: 'Test review passed' });
+    assert.equal(r.status, 200, 'administrator approves identity');
+  }
   r = await a('POST', '/api/auth/register', { email: 'ada@example.com', full_name: 'Dup', password: 'longpassword1', pin: '1234' });
   assert.equal(r.status, 409, 'duplicate email rejected');
   r = await client()('GET', '/api/me');
