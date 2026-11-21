@@ -84,6 +84,30 @@
       '<button type="button" class="muted" style="padding:8px" data-act="go" data-v="' + (reg ? 'login' : 'register') + '">' + (reg ? 'I already have an account' : 'Create a new account') + '</button>' +
       '</form></section>';
   }
+  function vVerification() {
+    var me = S.me, state = me.verification_status || 'pending';
+    var heading = state === 'approved' ? 'Identity verified' : state === 'rejected' ? 'Review needed' : state === 'submitted' ? 'Verification in review' : 'Verify your identity';
+    var copy = state === 'approved' ? 'Your identity has been approved. Your banking features are ready.' :
+      state === 'rejected' ? 'Your verification was not approved. Please review your details and submit them again.' :
+      state === 'submitted' ? 'Your details have been sent to our verification team. We will enable banking once an administrator approves your identity.' :
+      'Complete this short form. A Prime Trust administrator will review your identity before you can use banking features.';
+    return '<section class="screen">' + status +
+      '<div class="brand">Prime Trust</div><div class="panel" style="margin-top:18px">' +
+      '<div class="ti" style="width:52px;height:52px;border-radius:16px;margin-bottom:16px">' + ic(state === 'approved' ? 'detail' : 'user') + '</div>' +
+      '<h2>' + esc(heading) + '</h2><p class="lead">' + esc(copy) + '</p>' +
+      (state === 'approved' ? '<button class="pillbtn w" data-act="go" data-v="home">Continue to banking</button>' :
+      state === 'submitted' ? '<div class="subrow" style="margin-top:16px">Status: <b>Pending administrator approval</b></div><button class="pillbtn d" style="margin-top:12px" data-act="logout">Log out</button>' :
+      '<form class="form" data-form="verification" style="margin-top:16px">' +
+      '<label class="field">Legal name<input name="legal_name" required minlength="2" maxlength="100" value="' + esc(me.name) + '" autocomplete="name"></label>' +
+      '<label class="field">Date of birth<input name="date_of_birth" type="date" required></label>' +
+      '<label class="field">Residential address<textarea name="address" required minlength="8" maxlength="250" rows="3" placeholder="Street, city, state, country"></textarea></label>' +
+      '<label class="field">Government ID type<select name="id_type" required><option value="">Select ID type</option><option>Passport</option><option>Driver license</option><option>National identity card</option><option>Other government ID</option></select></label>' +
+      '<p class="hint">Do not enter your SSN, ITIN, or full ID number here. An administrator will review your submission and may contact you securely for document checks.</p>' +
+      '<p class="err" role="alert"></p><button class="pillbtn w" type="submit">Submit for review</button>' +
+      '<button type="button" class="muted" style="padding:8px" data-act="logout">Log out</button></form>') +
+      '</div></section>';
+  }
+
   function dock(cur) {
     var b = function (v, icon, label) {
       return '<button data-act="go" data-v="' + v + '" aria-label="' + label + '"' + (cur === v ? ' aria-current="page"' : '') + '>' + ic(icon) + (cur === v ? label : '') + '</button>';
@@ -210,7 +234,7 @@
     switch (S.view) {
       case 'login': html = vAuth('login'); break;
       case 'register': html = vAuth('register'); break;
-      case 'home': html = vHome(); break;
+      case 'verification': html = vVerification(); break;\n      case 'home': html = vHome(); break;
       case 'history': html = vHistory(); break;
       case 'card': html = vCard(); break;
       default: html = vWelcome();
@@ -284,13 +308,13 @@
     setErr(form, ''); busy(form, true);
     var p;
     if (kind === 'login') p = api('POST', '/api/auth/login', { email: d.email, password: d.password });
-    else if (kind === 'register') p = api('POST', '/api/auth/register', d);
+    else if (kind === 'register') p = api('POST', '/api/auth/register', d);\n    else if (kind === 'verification') p = api('POST', '/api/verification/submit', d);
     else if (kind === 'send') p = api('POST', '/api/transfers', { to_account: d.to_account, amount: d.amount, pin: d.pin, note: d.note }, S.idem);
     else if (kind === 'airtime') p = api('POST', '/api/airtime', { network: d.network, phone: d.phone, amount: d.amount, pin: d.pin }, S.idem);
     else if (kind === 'bills') p = api('POST', '/api/bills', { biller: d.biller, reference: d.reference, amount: d.amount, pin: d.pin }, S.idem);
     else return;
     p.then(function (res) {
-      if (kind === 'login' || kind === 'register') return load().then(function () { S.view = 'home'; render(); toast(kind === 'register' ? 'Account created' : 'Logged in'); });
+      if (kind === 'login' || kind === 'register' || kind === 'verification') return load().then(function () { S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; render(); toast(kind === 'verification' ? 'Submitted for administrator review' : kind === 'register' ? 'Account created' : 'Logged in'); });
       var msg = kind === 'send' ? 'Sent to ' + res.to : kind === 'airtime' ? 'Airtime bought' : 'Bill paid';
       return done(msg);
     }).catch(function (e) {
@@ -303,7 +327,7 @@
   // ---------- boot ----------
   api('GET', '/api/meta').then(function (m) { S.meta = m; }).catch(function () {})
     .then(function () { return load(); })
-    .then(function () { S.view = 'home'; })
+    .then(function () { S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; })
     .catch(function () { S.me = null; S.view = 'welcome'; })
     .then(function () { render(); });
 })();
