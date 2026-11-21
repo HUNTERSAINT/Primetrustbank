@@ -65,6 +65,30 @@ CREATE TABLE IF NOT EXISTS idempotency (
 );
 `);
 
+// Identity review is performed by a configured bank administrator.
+const userColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+if (!userColumns.includes('verification_status')) {
+  db.exec("ALTER TABLE users ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'pending' CHECK (verification_status IN ('pending','submitted','approved','rejected'))");
+}
+if (!userColumns.includes('verification_submitted_at')) {
+  db.exec('ALTER TABLE users ADD COLUMN verification_submitted_at INTEGER');
+}
+db.exec(`
+CREATE TABLE IF NOT EXISTS verification_requests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL UNIQUE REFERENCES users(id),
+  legal_name TEXT NOT NULL,
+  date_of_birth TEXT NOT NULL,
+  address TEXT NOT NULL,
+  id_type TEXT NOT NULL,
+  review_status TEXT NOT NULL DEFAULT 'submitted' CHECK (review_status IN ('submitted','approved','rejected')),
+  admin_note TEXT,
+  submitted_at INTEGER NOT NULL,
+  reviewed_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_verification_status ON verification_requests(review_status, submitted_at);
+`);
+
 // System accounts that receive airtime/bill payments and fund sandbox deposits.
 const ensureSystem = db.prepare(
   `INSERT OR IGNORE INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, ?, 'system', 0)`
