@@ -1,7 +1,7 @@
 # Prime Trust Bank
 
 A full-stack demo banking app: Express API, SQLite database, and a mobile-style web app in plain HTML/CSS/JS.
-It uses **play money only**. It is not a licensed bank and must not hold real funds.
+Before it holds real customer funds it needs the compliance and payment-rail work listed at the bottom of this file.
 
 ## Run it
 
@@ -19,7 +19,7 @@ npm test           # API smoke test on a throwaway database
 - Airtime and bill payments, approved with a 4-digit transaction PIN
 - Freeze and unfreeze the card
 - Transaction history and recent beneficiaries
-- "Add funds" credits play money (sandbox only, see below)
+- "Add funds" shows the account details to pay into. A test-funding endpoint exists for development and is off in production (`ALLOW_SANDBOX_FUNDING=false`).
 
 ## How the money side is built
 
@@ -41,7 +41,7 @@ npm test           # API smoke test on a throwaway database
 | Variable | Purpose |
 | --- | --- |
 | `JWT_SECRET` | Required when `NODE_ENV=production`. Use a long random string. |
-| `ALLOW_SANDBOX_FUNDING` | `false` removes the play-money "Add funds" endpoint. Default `true`. |
+| `ALLOW_SANDBOX_FUNDING` | `true` enables a test-only endpoint that credits free money. Keep `false` in production. Default `true` for local development. |
 | `DB_PATH` | Where the SQLite file lives. Default `./data/bank.db`. |
 | `PORT` | Default `3000`. |
 

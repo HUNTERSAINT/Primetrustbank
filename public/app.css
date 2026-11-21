@@ -25,7 +25,7 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:1.7;stroke
   .demo-note{display:none}
   .phone{max-width:none;height:100dvh;border-radius:0;border:0;box-shadow:none}
 }
-.screen{position:absolute;inset:0;overflow-y:auto;padding:max(14px,env(safe-area-inset-top,0px)) 18px 96px;scrollbar-width:none}
+.screen{position:absolute;inset:0;overflow-y:auto;padding:max(24px,env(safe-area-inset-top,0px)) 18px 96px;scrollbar-width:none}
 .screen::-webkit-scrollbar{display:none}
 .sb{display:flex;justify-content:space-between;align-items:center;font-weight:600;font-size:12px;padding:2px 8px 0}
 .sb span{display:flex;gap:5px;align-items:center;font-size:13px}

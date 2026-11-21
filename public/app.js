@@ -57,7 +57,7 @@
       '<div class="m"><b>' + esc(title) + '</b><small>' + esc(LABEL[t.type] || 'Payment') + ' · ' + esc(fdate(t.created_at)) + (t.note ? ' · ' + esc(t.note) : '') + '</small></div>' +
       '<div class="r"><b style="color:' + (neg ? 'var(--fg)' : 'var(--good)') + '">' + (neg ? '-' : '+') + money(Math.abs(t.amount)) + ' USD</b><small>Successful</small></div></div>';
   }
-  var status = '<div class="sb"><span>9:41</span><span>' + ic('wifi') + '▮</span></div>';
+  var status = '';
   var artCard = '<svg class="art" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice"><use href="#art"/></svg>';
 
   // ---------- views ----------
@@ -65,7 +65,6 @@
     return '<section class="screen">' + status +
       '<div class="brand">Prime Trust</div><div class="stand"></div>' +
       '<div class="tilt"><div class="cardface">' + artCard + '<span class="tt">Prime Card</span><span class="chip"></span><span class="num">1234 5678 9101</span><span class="nm">Your name here</span><span class="nw">' + ic('tap') + '</span></div></div>' +
-      '<div class="wnote">Demo bank. Play money only.</div>' +
       '<div class="cta"><button class="pillbtn w" data-act="go" data-v="register">Create account</button>' +
       '<button class="pillbtn d" data-act="go" data-v="login">Login</button></div></section>';
   }
@@ -176,6 +175,16 @@
       '<label class="field">Amount (USD)<input name="amount" type="number" inputmode="decimal" min="0.01" step="0.01" required placeholder="0.00"></label>' + pinField() +
       '<p class="err" role="alert"></p><button class="pillbtn w" type="submit">Pay bill</button></form>');
   }
+  function sFund() {
+    var me = S.me;
+    return sheetWrap('Add funds',
+      '<p class="muted" style="margin-bottom:8px">Send money to this account to fund it.</p>' +
+      '<div class="kv"><span>Bank</span><b>Prime Trust Bank</b></div>' +
+      '<div class="kv"><span>Account name</span><b>' + esc(me.name) + '</b></div>' +
+      '<div class="kv"><span>Account number</span><b>' + esc(me.account.number) + '</b></div>' +
+      '<button class="pillbtn w" style="margin-top:16px" data-act="copy">Copy account number</button>' +
+      (me.sandbox_funding ? '<button class="pillbtn d" style="margin-top:10px" data-act="testfunds">Add 500.00 test funds</button>' : ''));
+  }
   function sDetails() {
     var me = S.me;
     return sheetWrap('Card details',
@@ -207,7 +216,7 @@
       default: html = vWelcome();
     }
     if (S.sheet && S.me) {
-      html += ({ send: function () { return sSend(prefill); }, airtime: sAirtime, bills: sBills, details: sDetails, profile: sProfile }[S.sheet] || function () { return ''; })();
+      html += ({ send: function () { return sSend(prefill); }, airtime: sAirtime, bills: sBills, fund: sFund, details: sDetails, profile: sProfile }[S.sheet] || function () { return ''; })();
     }
     app.innerHTML = html;
     var f = app.querySelector('input:not([type=hidden])');
@@ -248,9 +257,9 @@
       (navigator.clipboard ? navigator.clipboard.writeText(n) : Promise.reject()).then(function () { toast('Account number copied'); }, function () { toast('Account number: ' + n); });
       return;
     }
-    if (a === 'addfunds') {
-      if (!S.me.sandbox_funding) return toast('Send money to ' + S.me.account.number + ' to fund this account');
-      api('POST', '/api/deposit', { amount: 500 }, uuid()).then(function () { return done('USD 500.00 added (play money)'); }).catch(function (e) { toast(e.message); });
+    if (a === 'addfunds') return openSheet('fund');
+    if (a === 'testfunds') {
+      api('POST', '/api/deposit', { amount: 500 }, uuid()).then(function () { return done('USD 500.00 test funds added'); }).catch(function (e) { toast(e.message); });
       return;
     }
     if (a === 'freeze') {
