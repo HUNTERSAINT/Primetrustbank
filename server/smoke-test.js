@@ -35,16 +35,23 @@ function client() {
   const a = client(), b = client(), admin = client();
   let r;
 
-  const registrationKycA = { legal_name: 'Ada Okafor', date_of_birth: '1995-05-12', address: '12 Example Street, Lagos, Nigeria', id_type: 'Passport', id_front: 'data:image/jpeg;base64,AA==', id_back: '', selfie: '' };
+  const registrationKycA = { legal_name: 'Ada Okafor', date_of_birth: '1995-05-12', address: '12 Example Street, Lagos, Nigeria', id_type: 'Passport', id_country: 'Kenya', id_number: 'A1234567', id_expiry: '2035-01-01', id_front: 'data:image/jpeg;base64,AA==', id_back: '', selfie: 'data:image/jpeg;base64,AA==' };
   const registrationKycB = { ...registrationKycA, legal_name: 'Tolu Bello' };
   r = await a('POST', '/api/auth/register', { email: 'ada@example.com', full_name: 'Ada Okafor', password: 'longpassword1', pin: '1234', ...registrationKycA });
   assert.equal(r.status, 201, 'register a with KYC');
   r = await b('POST', '/api/auth/register', { email: 'tolu@example.com', full_name: 'Tolu Bello', password: 'longpassword2', pin: '4321', ...registrationKycB });
   assert.equal(r.status, 201, 'register b with KYC');
+  // Input rules
+  const bad = async (patch, why) => { const x = await client()('POST', '/api/auth/register', { email: 'x' + Math.random().toString(36).slice(2) + '@example.com', full_name: 'Test Person', password: 'longpassword3', pin: '1234', ...registrationKycA, ...patch }); assert.equal(x.status, 400, why + ' -> ' + JSON.stringify(x.body)); };
+  await bad({ date_of_birth: new Date(Date.now() - 17 * 365.25 * 864e5).toISOString().slice(0, 10) }, 'under 18 rejected');
+  await bad({ id_expiry: '2020-01-01' }, 'expired ID rejected');
+  await bad({ id_number: '' }, 'ID number required');
+  await bad({ selfie: '' }, 'selfie required');
+  await bad({ id_type: 'Driver license' }, 'back of non-passport ID required');
   // Identity review is required before any banking action.
   r = await a('POST', '/api/deposit', { amount: 20 });
   assert.equal(r.status, 403, 'pending user cannot use banking actions');
-  const verification = { legal_name: 'Ada Okafor', date_of_birth: '1995-05-12', address: '12 Example Street, Lagos, Nigeria', id_type: 'Passport', id_front: 'data:image/jpeg;base64,AA==', id_back: '', selfie: '' };
+  const verification = { ...registrationKycA };
   r = await a('POST', '/api/verification/submit', verification);
   assert.equal(r.status, 200, 'submit identity for review');
   r = await b('POST', '/api/verification/submit', { ...verification, legal_name: 'Tolu Bello' });
@@ -56,14 +63,31 @@ function client() {
   const dbForKyc = require('./db');
   const storedKyc = await dbForKyc.get('SELECT vr.id_front_data FROM verification_requests vr JOIN users u ON u.id=vr.user_id WHERE u.email=?', ['ada@example.com']);
   assert.ok(storedKyc && storedKyc.id_front_data.startsWith('enc:v'), 'identity documents encrypted at rest');
+  const storedNo = await dbForKyc.get('SELECT id_number_enc, id_last4 FROM verification_requests vr JOIN users u ON u.id=vr.user_id WHERE u.email=?', ['ada@example.com']);
+  assert.ok(storedNo.id_number_enc.startsWith('enc:v') && !storedNo.id_number_enc.includes('A1234567'), 'ID number encrypted at rest');
+  assert.equal(storedNo.id_last4, '4567');
   const adaRequest = pending.find(x => x.email === 'ada@example.com');
   const viewedDocs = await admin('GET', '/api/admin/requests/' + adaRequest.id);
   assert.equal(viewedDocs.status, 200, 'admin can retrieve KYC documents');
   assert.equal(viewedDocs.body.documents.front, verification.id_front, 'KYC document decrypts for authorized review');
-  for (const request of pending) {
-    r = await admin('POST', '/api/admin/requests/' + request.id + '/review', { decision: 'approved', note: 'Test review passed' });
-    assert.equal(r.status, 200, 'administrator approves identity');
-  }
+  assert.equal(viewedDocs.body.id_number, 'A1234567', 'ID number decrypts for authorized review');
+  const toluRequest = pending.find(x => x.email === 'tolu@example.com');
+  r = await admin('POST', '/api/admin/requests/' + toluRequest.id + '/review', { decision: 'rejected', note: '' });
+  assert.equal(r.status, 400, 'rejection needs a reason');
+  r = await admin('POST', '/api/admin/requests/' + toluRequest.id + '/review', { decision: 'approved', tier: 2 });
+  assert.equal(r.status, 400, 'level 2 needs proof of address');
+  r = await admin('POST', '/api/admin/requests/' + toluRequest.id + '/review', { decision: 'rejected', note: 'Photo is blurry' });
+  assert.equal(r.status, 200, 'rejected with reason');
+  r = await b('POST', '/api/transfers', { to_account: '1234567890', amount: 1, pin: '4321' });
+  assert.equal(r.status, 403, 'rejected customer cannot bank');
+  r = await b('POST', '/api/verification/submit', { ...registrationKycB, proof_address: 'data:image/jpeg;base64,AA==' });
+  assert.equal(r.status, 200, 'customer resubmits after rejection');
+  const toluRequest2 = (await admin('GET', '/api/admin/requests')).body.requests.find(x => x.email === 'tolu@example.com');
+  assert.equal(toluRequest2.has_proof, true);
+  r = await admin('POST', '/api/admin/requests/' + adaRequest.id + '/review', { decision: 'approved', tier: 1, note: 'Test review passed' });
+  assert.equal(r.status, 200, 'administrator approves identity at level 1');
+  r = await admin('POST', '/api/admin/requests/' + toluRequest2.id + '/review', { decision: 'approved', tier: 2 });
+  assert.equal(r.status, 200, 'administrator approves identity at level 2');
   r = await admin('POST', '/api/admin/impersonate/' + adaRequest.user_id, {});
   assert.equal(r.status, 200, 'admin can login as customer');
   const impersonatedMe = await admin('GET', '/api/me');
@@ -117,6 +141,21 @@ function client() {
   assert.equal(r.status, 200);
   assert.equal((await a('GET', '/api/me')).body.card, null, 'card is not auto-issued');
 
+  r = await a('POST', '/api/deposit', { amount: 1000 });
+  r = await a('POST', '/api/deposit', { amount: 1000 });
+  r = await a('POST', '/api/transfers', { to_account: meB.account.number, amount: 1200, pin: '1234' });
+  assert.equal(r.status, 422, 'level 1 per-transaction cap enforced');
+  r = await a('POST', '/api/verification/upgrade', { proof_address: 'data:image/jpeg;base64,AA==' });
+  assert.equal(r.status, 200, 'customer uploads proof of address');
+  r = await a('POST', '/api/verification/upgrade', { proof_address: 'data:image/jpeg;base64,AA==' });
+  assert.equal(r.status, 409, 'second upload while pending is refused');
+  const up = (await admin('GET', '/api/admin/requests?status=upgrade')).body.requests;
+  assert.equal(up.length, 1, 'upgrade shows in the review queue');
+  r = await admin('POST', '/api/admin/requests/' + up[0].id + '/upgrade-review', { decision: 'approved' });
+  assert.equal(r.status, 200, 'upgrade approved');
+  assert.equal((await a('GET', '/api/me')).body.kyc_tier, 2, 'customer is level 2');
+  r = await a('POST', '/api/transfers', { to_account: meB.account.number, amount: 1200, pin: '1234' });
+  assert.equal(r.status, 200, 'level 2 allows the larger transfer ' + JSON.stringify(r.body));
   // Ledger must balance: all account balances sum to zero across user + system accounts.
   const db = require('./db');
   const sum = (await db.get('SELECT SUM(balance) s FROM accounts')).s;

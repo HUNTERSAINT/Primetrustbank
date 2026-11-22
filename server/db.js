@@ -119,7 +119,7 @@ async function init() {
     const lite = dir ? new PGlite(dir) : new PGlite();
     await lite.waitReady;
     const wrap = (c) => async (text, params) => {
-      const r = await c.query(text, params || []);
+      const r = await c.query(text, params || [], { parsers: { 1700: (v) => parseFloat(v), 20: (v) => parseInt(v, 10) } });
       return { rows: toNum(r.rows || []), rowCount: r.affectedRows != null ? r.affectedRows : (r.rows || []).length };
     };
     driver = {

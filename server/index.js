@@ -8,6 +8,7 @@ const rateLimit = require('express-rate-limit');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('./db');
+const kyc = require('./kyc');
 
 const PROD = process.env.NODE_ENV === 'production';
 const PORT = process.env.PORT || 3000;
@@ -322,51 +323,6 @@ app.post('/api/admin/impersonate-return', adminAuth, wrap(async (req,res)=>{
   res.json({ ok: true });
 }));
 
-app.get('/api/admin/requests', adminAuth, wrap(async (req, res) => {
-  const status=String(req.query.status||'submitted');
-  const rows = (await db.all(`SELECT vr.id, vr.user_id, vr.legal_name, vr.date_of_birth, vr.address, vr.id_type,
-    vr.review_status, vr.admin_note, vr.submitted_at, vr.reviewed_at, u.email, u.full_name
-    FROM verification_requests vr JOIN users u ON u.id = vr.user_id
-    WHERE (? = 'all' OR vr.review_status = ?) ORDER BY vr.submitted_at DESC LIMIT 200`, [status,status]));
-  res.json({ requests: rows });
-}));
-
-app.get('/api/admin/requests/:id', adminAuth, wrap(async (req,res)=>{
-  const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid identity request.');
-  const request=(await db.get("SELECT id,user_id,id_front_data,id_back_data,selfie_data FROM verification_requests WHERE id=?", [id]));
-  if(!request)throw httpErr(404,'Identity request not found.');
-  const docs={front:request.id_front_data||null,back:request.id_back_data||null,selfie:request.selfie_data||null};
-  const encrypted={};
-  for(const [key,column] of [['front','id_front_data'],['back','id_back_data'],['selfie','selfie_data']]){
-    const value=docs[key];
-    if(value&&!value.startsWith('enc:v1:')&&!value.startsWith('enc:v2:')){encrypted[column]=sealKyc(value);docs[key]=value;}
-    else {
-      docs[key]=unsealKyc(value);
-      if(value&&HAS_KYC_ENCRYPTION_KEY&&value.startsWith('enc:v1:')) encrypted[column]=sealKyc(docs[key]);
-    }
-  }
-  if(Object.keys(encrypted).length){const sets=Object.keys(encrypted).map(k=>k+'=?').join(',');(await db.run('UPDATE verification_requests SET '+sets+' WHERE id=?', [...Object.values(encrypted),id]));}
-  await auditAdmin(req,'KYC_DOCUMENTS_VIEWED',request.user_id,null,'Identity document images opened for review');
-  res.json({documents:docs});
-}));
-
-app.post('/api/admin/requests/:id/review', adminAuth, wrap(async (req, res) => {
-  const id = Number(req.params.id);
-  const decision = String((req.body || {}).decision || '');
-  const note = String((req.body || {}).note || '').trim().slice(0, 300);
-  if (!Number.isSafeInteger(id) || id < 1 || !['approved','rejected'].includes(decision)) throw httpErr(400, 'Invalid review decision.');
-  const request = (await db.get('SELECT * FROM verification_requests WHERE id = ?', [id]));
-  if (!request || request.review_status !== 'submitted') throw httpErr(404, 'Pending verification request not found.');
-  (await db.tx(async () => {
-    (await db.run('UPDATE verification_requests SET review_status = ?, admin_note = ?, reviewed_at = ? WHERE id = ?', [decision, note || null, now(), id]));
-    (await db.run('UPDATE users SET verification_status = ? WHERE id = ?', [decision, request.user_id]));
-    await auditAdmin(req, decision==='approved'?'KYC_APPROVED':'KYC_REJECTED', request.user_id, null, note || 'Identity review');
-  }));
-  res.json({ ok: true, status: decision });
-}));
-
-
-/* ---------- non-investment admin console ---------- */
 app.get('/api/admin/overview', adminAuth, wrap(async (req, res) => {
   const users = (await db.get('SELECT COUNT(*) total, SUM(CASE WHEN status = \'active\' THEN 1 ELSE 0 END) active, SUM(CASE WHEN status = \'suspended\' THEN 1 ELSE 0 END) suspended FROM users', []));
   const kyc = (await db.get("SELECT COUNT(*) n FROM verification_requests WHERE review_status = 'submitted'", [])).n;
@@ -557,74 +513,33 @@ app.post('/api/support/messages', auth, sensitiveWriteLimiter, wrap(async (req,r
   res.status(201).json({ok:true});
 }));
 
-app.post('/api/verification/submit', auth, sensitiveWriteLimiter, wrap(async (req, res) => {
-  const b = req.body || {};
-  const legalName = String(b.legal_name || '').trim();
-  const dob = String(b.date_of_birth || '').trim();
-  const address = String(b.address || '').trim();
-  const idType = String(b.id_type || '').trim();
-  const front = String(b.id_front || '');
-  const back = String(b.id_back || '');
-  const selfie = String(b.selfie || '');
-  const validImage = value => !value || (/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(value) && value.length <= 1500000);
-  if (!front || !validImage(front) || !validImage(back) || !validImage(selfie)) throw httpErr(400, 'Upload a clear front image of your ID. Each image must be a supported photo under 1.5 MB after compression.');
-  if (legalName.length < 2 || legalName.length > 100) throw httpErr(400, 'Enter your legal name.');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || Number.isNaN(Date.parse(dob))) throw httpErr(400, 'Enter a valid date of birth.');
-  if (address.length < 8 || address.length > 250) throw httpErr(400, 'Enter your residential address.');
-  if (!['Passport','Driver license','National identity card','Other government ID'].includes(idType)) throw httpErr(400, 'Choose a valid ID type.');
-  const t = now();
-  (await db.tx(async () => {
-    (await db.run(`INSERT INTO verification_requests (user_id, legal_name, date_of_birth, address, id_type, review_status, submitted_at, id_front_data, id_back_data, selfie_data)
-      VALUES (?,?,?,?,?,'submitted',?,?,?,?)
-      ON CONFLICT(user_id) DO UPDATE SET legal_name=excluded.legal_name, date_of_birth=excluded.date_of_birth,
-      address=excluded.address, id_type=excluded.id_type, id_front_data=excluded.id_front_data, id_back_data=excluded.id_back_data,
-      selfie_data=excluded.selfie_data, review_status='submitted', admin_note=NULL, submitted_at=excluded.submitted_at, reviewed_at=NULL`, [req.user.id, legalName, dob, address, idType, t, sealKyc(front), sealKyc(back), sealKyc(selfie)]));
-    (await db.run("UPDATE users SET verification_status='submitted', verification_submitted_at=? WHERE id=?", [t, req.user.id]));
-  }));
-  res.json({ ok: true, verification_status: 'submitted' });
-}));
-
 app.post('/api/auth/register', authLimiter, wrap(async (req, res) => {
   const b = req.body || {};
   const em = String(b.email || '').trim().toLowerCase();
   const name = String(b.full_name || '').trim();
-  const legalName = String(b.legal_name || '').trim();
-  const dob = String(b.date_of_birth || '').trim();
-  const address = String(b.address || '').trim();
-  const idType = String(b.id_type || '').trim();
-  const front = String(b.id_front || '');
-  const back = String(b.id_back || '');
-  const selfie = String(b.selfie || '');
   const password = b.password;
   const pin = b.pin;
-
-
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em) || em.length > 120) throw httpErr(400, 'Enter a valid email address.');
   if ((await db.get('SELECT 1 FROM users WHERE email = ?', [em]))) throw httpErr(409, 'An account with this email already exists.');
   if (name.length < 2 || name.length > 80) throw httpErr(400, 'Enter your full name.');
   if (typeof password !== 'string' || password.length < 12 || Buffer.byteLength(password, 'utf8') > 72) throw httpErr(400, 'Password must be at least 12 characters and no more than 72 UTF-8 bytes.');
   if (typeof pin !== 'string' || !/^\d{4}$/.test(pin)) throw httpErr(400, 'Transaction PIN must be 4 digits.');
-  if (legalName.length < 2 || legalName.length > 100) throw httpErr(400, 'Enter your legal name.');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || Number.isNaN(Date.parse(dob)) || new Date(dob + 'T00:00:00Z').toISOString().slice(0,10) !== dob) throw httpErr(400, 'Enter a valid date of birth.');
-  if (dob > new Date().toISOString().slice(0,10)) throw httpErr(400, 'Date of birth cannot be in the future.');
-  if (address.length < 8 || address.length > 250) throw httpErr(400, 'Enter your residential address.');
-  if (!['Passport','Driver license','National identity card','Other government ID'].includes(idType)) throw httpErr(400, 'Choose a valid ID type.');
-  const validImage = (value, required) => {
-    if (!value) return !required;
-    if (value.length > 1500000 || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) return false;
-    const data = value.slice(value.indexOf(',') + 1);
-    return data.length > 0 && Buffer.from(data, 'base64').length <= 1100000;
-  };
-  if (!validImage(front, true) || !validImage(back, false) || !validImage(selfie, false)) throw httpErr(400, 'Upload a clear ID photo. Each image must be JPG, PNG or WebP and under 1.1 MB after compression.');
+  const kycData = kyc.parseKyc(b, httpErr);
 
   const ph = bcrypt.hashSync(password, 12), pinh = bcrypt.hashSync(pin, 12), submittedAt = now();
-  const userId = (await db.tx(async () => {
-    const u = (await db.run("INSERT INTO users (email, full_name, password_hash, pin_hash, verification_status, verification_submitted_at, created_at) VALUES (?,?,?,?, 'submitted', ?, ?)", [em, name, ph, pinh, submittedAt, submittedAt])).lastInsertRowid;
-    const a = (await db.run("INSERT INTO accounts (user_id, account_number, kind) VALUES (?,?, 'user')", [u, (await newAccountNumber())])).lastInsertRowid;
-    // Card is issued only after customer request and administrator approval.
-    (await db.run("INSERT INTO verification_requests (user_id, legal_name, date_of_birth, address, id_type, review_status, submitted_at, id_front_data, id_back_data, selfie_data) VALUES (?,?,?,?,?,'submitted',?,?,?,?)", [u, legalName, dob, address, idType, submittedAt, sealKyc(front), sealKyc(back || null), sealKyc(selfie || null)]));
-    return u;
-  }));
+  let userId;
+  try {
+    userId = await db.tx(async () => {
+      const u = (await db.run("INSERT INTO users (email, full_name, password_hash, pin_hash, verification_status, verification_submitted_at, created_at) VALUES (?,?,?,?, 'submitted', ?, ?)", [em, name, ph, pinh, submittedAt, submittedAt])).lastInsertRowid;
+      await db.run("INSERT INTO accounts (user_id, account_number, kind) VALUES (?,?, 'user')", [u, (await newAccountNumber())]);
+      // Card is issued only after customer request and administrator approval.
+      await kyc.saveRequest(db, sealKyc, u, kycData, submittedAt);
+      return u;
+    });
+  } catch (e) {
+    if (e && e.code === '23505') throw httpErr(409, 'An account with this email already exists.');
+    throw e;
+  }
   await issueSession(res, Number(userId));
   res.status(201).json({ ok: true, verification_status: 'submitted' });
 }));
@@ -749,7 +664,7 @@ app.get('/api/me', auth, wrap(async (req, res) => {
   if(req.user.verification_status==='approved')await processDueTransfers(req.user.id);
   const card=(await db.get('SELECT last4,expiry,frozen,activated,online_enabled,international_enabled,daily_limit,card_pin_hash FROM cards WHERE account_id=?', [req.account.id]));
   const cardRequest=(await db.get('SELECT status,requested_at FROM card_requests WHERE user_id=?', [req.user.id]))||null;
-  res.json({name:req.user.full_name,email:req.user.email,verification_status:req.user.verification_status,mfa_enabled:!!req.user.mfa_enabled,
+  res.json({name:req.user.full_name,email:req.user.email,verification_status:req.user.verification_status,kyc_tier:req.user.kyc_tier,tier:kyc.tierOf(req.user),mfa_enabled:!!req.user.mfa_enabled,
     account:{number:req.account.account_number,currency:req.account.currency,balance:req.account.balance},
     card:card?{last4:card.last4,expiry:card.expiry,frozen:!!card.frozen,activated:!!card.activated,online_enabled:!!card.online_enabled,international_enabled:!!card.international_enabled,daily_limit:card.daily_limit,card_pin_set:!!card.card_pin_hash}:null,
     card_request:cardRequest,sandbox_funding:SANDBOX_FUNDING});
@@ -793,7 +708,9 @@ app.post('/api/transfers', auth, requireVerified, moneyLimiter, wrap(async (req,
     if (!amt) throw httpErr(400, 'Enter a valid amount (up to 2 decimals).');
     if (amt > 1000000 * 100) throw httpErr(400, 'Amount is above the single transfer limit.');
     const userLimit=(await db.get('SELECT daily_transfer_limit FROM account_limits WHERE user_id=?', [req.user.id]));
-    const dailyLimit=userLimit?userLimit.daily_transfer_limit:500000;
+    const tier=kyc.tierOf(req.user);
+    if(amt>tier.per_transaction)throw httpErr(422,'This amount is above the limit for your verification level ('+tier.name+'). Upload proof of address to raise your limits.');
+    const dailyLimit=Math.min(userLimit?userLimit.daily_transfer_limit:500000,tier.daily_transfer);
     if(amt>dailyLimit||(await transferDailyTotal(req.user.id))+amt>dailyLimit)throw httpErr(422,'Your daily transfer limit would be exceeded. Change your account limits or try another day.');
     if (!/^\d{10}$/.test(String(to_account))) throw httpErr(400, 'Enter a 10-digit account number.');
     await verifyPin(req.user, pin);
@@ -823,7 +740,7 @@ app.post('/api/bills', auth, requireVerified, moneyLimiter, wrap(async (req, res
     const amt = cents(amount);
     if (!amt || amt > 50000 * 100) throw httpErr(400, 'Enter a valid amount.');
     const payLimitRow=(await db.get('SELECT daily_payment_limit FROM account_limits WHERE user_id=?', [req.user.id]));
-    const payLimit=payLimitRow?payLimitRow.daily_payment_limit:100000;
+    const payLimit=Math.min(payLimitRow?payLimitRow.daily_payment_limit:100000,kyc.tierOf(req.user).daily_payment);
     const dayStart=new Date();dayStart.setHours(0,0,0,0);
     const payUsed=(await db.get("SELECT COALESCE(SUM(-amount),0) total FROM transactions WHERE account_id=? AND type IN ('airtime','bill') AND created_at>=?", [req.account.id,dayStart.getTime()])).total;
     if(amt>payLimit||payUsed+amt>payLimit)throw httpErr(422,'Your daily payment limit would be exceeded.');
@@ -960,7 +877,8 @@ async function processDueTransfers(userId){
   for(const item of due){
     try{
       const cap=(await db.get('SELECT daily_transfer_limit FROM account_limits WHERE user_id=?', [userId]));
-      const dailyCap=cap?cap.daily_transfer_limit:500000;
+      const owner=(await db.get('SELECT kyc_tier FROM users WHERE id=?', [userId]));
+      const dailyCap=Math.min(cap?cap.daily_transfer_limit:500000,kyc.tierOf(owner).daily_transfer);
       if(item.amount>dailyCap||(await transferDailyTotal(userId))+item.amount>dailyCap)throw new Error('Daily transfer limit exceeded.');
       const dest=(await db.get("SELECT a.*,u.full_name FROM accounts a JOIN users u ON u.id=a.user_id WHERE a.account_number=? AND a.kind='user'", [item.recipient_account]));
       const src=await getUserAccount(userId);
@@ -1023,6 +941,7 @@ app.post('/api/transfers/scheduled',auth,requireVerified,moneyLimiter,wrap(async
   if(!dest||dest.id===req.account.id)throw httpErr(404,'Recipient account not found.');
   const lim=(await db.get('SELECT daily_transfer_limit FROM account_limits WHERE user_id=?', [req.user.id]));
   if(lim&&amount>lim.daily_transfer_limit)throw httpErr(422,'Amount exceeds your configured transfer limit.');
+  if(amount>kyc.tierOf(req.user).per_transaction)throw httpErr(422,'This amount is above the limit for your verification level.');
   const id=(await db.run("INSERT INTO scheduled_transfers (user_id,recipient_account,recipient_name,amount,note,scheduled_at,created_at) VALUES (?,?,?,?,?,?,?)", [req.user.id,number,dest.full_name,amount,note,when,now()])).lastInsertRowid;
   await notifyUser(req.user.id,'Transfer scheduled','Your transfer to '+dest.full_name+' is scheduled.','transfer');
   res.status(201).json({ok:true,id});
@@ -1046,6 +965,8 @@ app.post('/api/disputes',auth,requireVerified,sensitiveWriteLimiter,wrap(async (
   await notifyUser(req.user.id,'Transaction dispute submitted','Your dispute was submitted for review.','support');
   res.status(201).json({ok:true});
 }));
+
+kyc.mount(app, { db, auth, adminAuth, wrap, httpErr, sealKyc, unsealKyc, auditAdmin, notifyUser, limiter: sensitiveWriteLimiter, now });
 
 app.use('/api', (req, res) => fail(res, 404, 'Not found.'));
 app.use((err, req, res, next) => {
