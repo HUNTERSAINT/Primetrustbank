@@ -373,3 +373,11 @@ body{
 .review-amount{font:600 30px var(--font-display);letter-spacing:-.5px;margin-bottom:8px;font-variant-numeric:tabular-nums;}
 .transfer-review h3{font-size:18px;margin-top:6px;overflow-wrap:anywhere;}
 @media(max-width:360px){.statement-filter{gap:7px}.receipt-amount{font-size:24px}.review-amount{font-size:26px}}
+
+/* Card request state */
+.card-request-panel{margin-top:18px;padding:28px 22px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:12px}
+.card-request-icon{width:64px;height:64px;border-radius:20px;display:grid;place-items:center;background:linear-gradient(145deg,rgba(145,113,255,.22),rgba(82,66,185,.12));border:1px solid rgba(178,160,255,.28);color:var(--accent,#a995ff)}
+.card-request-icon .i{width:30px;height:30px}
+.card-request-panel h2{margin:2px 0;font-size:22px;letter-spacing:-.5px}
+.card-request-panel .lead{max-width:320px;margin:0}
+.card-request-panel .pillbtn{width:100%;margin-top:8px}
