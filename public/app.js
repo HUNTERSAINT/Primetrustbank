@@ -70,17 +70,28 @@
   }
   function vAuth(mode) {
     var reg = mode === 'register';
+    var kyc = reg ?
+      '<div class="section-label">Identity verification</div>' +
+      '<p class="lead">Complete KYC now. An administrator will review your documents before banking is enabled.</p>' +
+      '<label class="field">Legal name<input name="legal_name" required minlength="2" maxlength="100" autocomplete="name" placeholder="As shown on your ID"></label>' +
+      '<label class="field">Date of birth<input name="date_of_birth" type="date" required autocomplete="bday"></label>' +
+      '<label class="field">Residential address<textarea name="address" required minlength="8" maxlength="250" rows="3" autocomplete="street-address" placeholder="Street, city, state, country"></textarea></label>' +
+      '<label class="field">Government ID type<select name="id_type" required><option value="">Select ID type</option><option>Passport</option><option>Driver license</option><option>National identity card</option><option>Other government ID</option></select></label>' +
+      '<label class="field">Front of government ID<input name="id_front" type="file" accept="image/jpeg,image/png,image/webp" required></label>' +
+      '<label class="field">Back of ID (optional)<input name="id_back" type="file" accept="image/jpeg,image/png,image/webp"></label>' +
+      '<label class="field">Selfie (optional)<input name="selfie" type="file" accept="image/jpeg,image/png,image/webp" capture="user"></label>' +
+      '<p class="hint">No SSN or ITIN is collected. Identity verification is reviewed by an administrator.</p>' : '';
     return '<section class="screen">' +
       '<div class="hd"><button class="circ" data-act="go" data-v="welcome" aria-label="Back">' + ic('back') + '</button><h4>' + (reg ? 'Create account' : 'Login') + '</h4><span></span></div>' +
       '<form class="form" data-form="' + mode + '" autocomplete="on">' +
       '<h2>' + (reg ? 'Open your account' : 'Welcome back') + '</h2>' +
-      '<p class="lead">' + (reg ? 'It takes about a minute.' : 'Log in to see your balance.') + '</p>' +
+      '<p class="lead">' + (reg ? 'Create your profile and submit identity verification in one step.' : 'Log in to see your balance.') + '</p>' +
       (reg ? '<label class="field">Full name<input name="full_name" autocomplete="name" required minlength="2" maxlength="80" placeholder="Ada Okafor"></label>' : '') +
       '<label class="field">Email<input name="email" type="email" autocomplete="email" required placeholder="you@example.com"></label>' +
       '<label class="field">Password<input name="password" type="password" autocomplete="' + (reg ? 'new-password' : 'current-password') + '" required minlength="12" maxlength="72" placeholder="At least 12 characters"></label>' +
-      (reg ? '<label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" autocomplete="off" required placeholder="4 digits"><span class="hint">You will enter this to approve every payment.</span></label>' : '') +
+      (reg ? '<label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" autocomplete="off" required placeholder="4 digits"><span class="hint">You will enter this to approve payments.</span></label>' + kyc : '') +
       '<p class="err" role="alert"></p>' +
-      '<button class="pillbtn w" type="submit">' + (reg ? 'Create account' : 'Login') + '</button>' +
+      '<button class="pillbtn w" type="submit">' + (reg ? 'Create account & submit KYC' : 'Login') + '</button>' +
       '<button type="button" class="muted" style="padding:8px" data-act="go" data-v="' + (reg ? 'login' : 'register') + '">' + (reg ? 'I already have an account' : 'Create a new account') + '</button>' +
       '</form></section>';
   }
@@ -380,7 +391,13 @@
     setErr(form, ''); busy(form, true);
     var p;
     if (kind === 'login') p = api('POST', '/api/auth/login', { email: d.email, password: d.password });
-    else if (kind === 'register') p = api('POST', '/api/auth/register', d);
+    else if (kind === 'register') {
+      var regFront=form.elements.id_front.files[0],regBack=form.elements.id_back.files[0],regSelfie=form.elements.selfie.files[0];
+      p=Promise.all([compressIdFile(regFront),compressIdFile(regBack),compressIdFile(regSelfie)]).then(function(images){
+        d.id_front=images[0];d.id_back=images[1];d.selfie=images[2];
+        return api('POST','/api/auth/register',d);
+      });
+    }
     else if (kind === 'verification') {
       var frontFile=form.elements.id_front.files[0],backFile=form.elements.id_back.files[0],selfieFile=form.elements.selfie.files[0];
       p=Promise.all([compressIdFile(frontFile),compressIdFile(backFile),compressIdFile(selfieFile)]).then(function(images){
@@ -402,7 +419,7 @@
     else return;
     p.then(function (res) {
       if (kind === 'support') return api('GET','/api/support/messages').then(function(d){S.support=d;render();toast('Message sent to support');});
-      if (kind === 'login' || kind === 'register' || kind === 'verification') return load().then(function () { S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; render(); toast(kind === 'verification' ? 'Submitted for administrator review' : kind === 'register' ? 'Account created' : 'Logged in'); });
+      if (kind === 'login' || kind === 'register' || kind === 'verification') return load().then(function () { S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; render(); toast(kind === 'verification' ? 'Submitted for administrator review' : kind === 'register' ? 'Account created; KYC submitted for review' : 'Logged in'); });
       var msg = kind === 'send' ? 'Sent to ' + res.to : kind === 'airtime' ? 'Airtime bought' : 'Bill paid';
       return done(msg);
     }).catch(function (e) {
