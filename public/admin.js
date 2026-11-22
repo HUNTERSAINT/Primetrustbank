@@ -19,7 +19,8 @@ async function go(page){S.page=page;renderNav();root.innerHTML='<div class="pane
 async function renderPage(){
  if(S.page==='overview')return overview();
  if(S.page==='users')return users();
- if(S.page==='card-requests')return cardRequests();\n if(S.page==='external-transfers')return externalTransfers();
+ if(S.page==='card-requests')return cardRequests();
+ if(S.page==='external-transfers')return externalTransfers();
  if(S.page==='user-detail')return userDetail();
  if(S.page==='kyc')return kyc();
  if(S.page==='transactions')return transactions();
