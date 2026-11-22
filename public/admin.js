@@ -105,8 +105,7 @@ function setPage(page){if(page==='user-detail')S.page='user-detail';else S.page=
 function downloadCsv(){
  const rows=S.txRows||[];const cols=['id','full_name','email','account_number','type','amount','balance_after','counterparty','note','created_at'];
  const quote=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
- const csv=[cols.join(','),...rows.map(r=>cols.map(k=>quote(k==='amount'?Number(r[k])/100:k==='balance_after'?Number(r[k])/100:r[k])).join(','))].join('\r
-');
+ const csv=[cols.join(','),...rows.map(r=>cols.map(k=>quote(k==='amount'?Number(r[k])/100:k==='balance_after'?Number(r[k])/100:r[k])).join(','))].join('\\r\\n');
  const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='prime-trust-transactions.csv';a.click();URL.revokeObjectURL(url);
 }
 $('#loginForm').addEventListener('submit',async e=>{e.preventDefault();$('#loginErr').textContent='';const d=Object.fromEntries(new FormData(e.target));try{await api('POST','/api/admin/login',d);showWorkspace(true);await go('overview');}catch(err){$('#loginErr').textContent=err.message;}});
