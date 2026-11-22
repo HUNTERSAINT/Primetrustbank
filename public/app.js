@@ -295,11 +295,18 @@
       return '<button type="button" class="bn" data-act="pick" data-acct="' + esc(b.account_number) + '">' + avatar(b.name) + '<span class="nm">' + esc(b.name.split(' ')[0]) + '</span></button>';
     }).join('') + '</div>' : '';
     return sheetWrap('Send money', chips +
-      '<form class="form" data-form="send" style="margin-top:0">' +
+      '<form class="form" data-form="send-review" style="margin-top:0">' +
       '<label class="field">Recipient account number<input name="to_account" inputmode="numeric" pattern="\\d{10}" maxlength="10" required placeholder="10 digits" value="' + esc(pre || '') + '"><span class="hint" id="lookup"></span></label>' +
       '<label class="field">Amount (USD)<input name="amount" type="number" inputmode="decimal" min="0.01" step="0.01" required placeholder="0.00"></label>' +
-      '<label class="field">Note (optional)<input name="note" maxlength="60" placeholder="What is it for?"></label>' + pinField() +
-      '<p class="err" role="alert"></p><button class="pillbtn w" type="submit">Send</button></form>');
+      '<label class="field">Note (optional)<input name="note" maxlength="60" placeholder="What is it for?"></label>' +
+      '<p class="hint">Review the recipient and amount before approving with your transaction PIN.</p><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Review transfer</button></form>');
+  }
+  function sSendConfirm() {
+    var d=S.transferDraft||{};
+    var cents=Math.round(Number(d.amount||0)*100);
+    return sheetWrap('Confirm transfer','<div class="transfer-review"><div class="review-amount">USD '+money(cents)+'</div><p class="muted">You are sending money to</p><h3>'+esc(d.recipient||'Verified recipient')+'</h3></div>'+
+      '<div class="panel receipt-details"><div class="kv"><span>Recipient account</span><b>'+esc(d.to_account||'')+'</b></div><div class="kv"><span>Transfer amount</span><b>USD '+money(cents)+'</b></div><div class="kv"><span>Fee</span><b>USD 0.00</b></div><div class="kv"><span>Total</span><b>USD '+money(cents)+'</b></div>'+(d.note?'<div class="kv"><span>Note</span><b>'+esc(d.note)+'</b></div>':'')+'</div>'+
+      '<form class="form" data-form="send-confirm"><label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required autocomplete="off"></label><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Confirm & send</button><button type="button" class="pillbtn d" data-act="edit-transfer">Edit transfer</button></form>');
   }
   function sAirtime() {
     return sheetWrap('Buy airtime', '<form class="form" data-form="airtime" style="margin-top:0">' +
@@ -432,7 +439,7 @@
       default: html = vWelcome();
     }
     if (S.sheet && S.me) {
-      html += ({ send: function () { return sSend(prefill); }, airtime: sAirtime, bills: sBills, fund: sFund, details: sDetails, profile: sProfile, goal: sGoal, 'mfa-disable': sMfaDisable, 'card-replace': sCardReplace }[S.sheet] || function () { return ''; })();
+      html += ({ send: function () { return sSend(prefill); }, 'send-confirm': sSendConfirm, airtime: sAirtime, bills: sBills, fund: sFund, details: sDetails, profile: sProfile, goal: sGoal, 'mfa-disable': sMfaDisable, 'card-replace': sCardReplace }[S.sheet] || function () { return ''; })();
     }
     if (S.me && S.impersonation && S.impersonation.active) html = '<div class="impersonation-banner"><div><b>Admin session · Viewing as customer</b><small>Administrator: '+esc(S.impersonation.admin_email||'')+'</small></div><button type="button" data-act="return-admin">Return to Admin</button></div>'+html;
     app.innerHTML = html;
@@ -463,6 +470,7 @@
     if (a === 'go') return go(t.dataset.v);
     if (a === 'transaction') { S.selectedTx=S.txs.find(function(x){return String(x.id)===String(t.dataset.id);})||null; return go('transaction-detail'); }
     if (a === 'clear-statement') { S.statementFrom='';S.statementTo='';return render(); }
+    if (a === 'edit-transfer') { S.sheet='send';return render(S.transferDraft&&S.transferDraft.to_account); }
     if (a === 'receipt-download') { if(!S.selectedTx)return; var q=S.selectedTx, amount=(q.amount>=0?'+':'-')+' USD '+money(Math.abs(q.amount)); var body='PRIME TRUST BANK\nTRANSACTION RECEIPT\n\nAmount: '+amount+'\nStatus: '+(q.status||'Successful')+'\nDate: '+new Date(q.created_at).toLocaleString()+'\nDescription: '+(q.counterparty||'—')+'\nReference: '+(q.reference||q.id||'—')+'\n'+(q.note?'Note: '+q.note+'\n':'')+'\nDemo receipt — not a proof of real funds.'; var blob=new Blob([body],{type:'text/plain;charset=utf-8'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='prime-trust-receipt-'+String(q.id||'transaction')+'.txt';link.click();setTimeout(function(){URL.revokeObjectURL(url);},1000);toast('Receipt downloaded');return; }
     if (a === 'refresh-support') return go('support');
     if (a === 'return-admin') { if(!confirm('End this customer session and return to the admin console?'))return; api('POST','/api/admin/impersonate-return',{}).then(function(){window.location.href='/api/admin/portal';}).catch(function(e){toast(e.message);}); return; }
@@ -566,7 +574,8 @@
       S.goal={name:d.name,target:target,saved:saved}; try{localStorage.setItem('ptb_goal',JSON.stringify(S.goal));}catch(_){}
       S.sheet=null; S.view='savings'; render(); toast('Savings goal saved'); return;
     }
-    else if (kind === 'send') p = api('POST', '/api/transfers', { to_account: d.to_account, amount: d.amount, pin: d.pin, note: d.note }, S.idem);
+    else if (kind === 'send-review') { api('GET','/api/accounts/lookup/'+encodeURIComponent(d.to_account)).then(function(rec){S.transferDraft={to_account:d.to_account,amount:d.amount,note:d.note,recipient:rec.name};S.sheet='send-confirm';render();}).catch(function(e){busy(form,false);setErr(form,e.message);});return; }
+    else if (kind === 'send-confirm') p = api('POST', '/api/transfers', { to_account: S.transferDraft.to_account, amount: S.transferDraft.amount, pin: d.pin, note: S.transferDraft.note }, S.idem);
     else if (kind === 'airtime') p = api('POST', '/api/airtime', { network: d.network, phone: d.phone, amount: d.amount, pin: d.pin }, S.idem);
     else if (kind === 'bills') p = api('POST', '/api/bills', { biller: d.biller, reference: d.reference, amount: d.amount, pin: d.pin }, S.idem);
     else return;
@@ -587,7 +596,8 @@
       if (kind === 'beneficiary') return load().then(function(){S.view='beneficiary-manage';render();toast('Recipient saved');});
 
       if (kind === 'login' || kind === 'register' || kind === 'verification') return load().then(function () { S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; render(); toast(kind === 'verification' ? 'Submitted for administrator review' : kind === 'register' ? 'Account created; KYC submitted for review' : 'Logged in'); });
-      var msg = kind === 'send' ? 'Sent to ' + res.to : kind === 'airtime' ? 'Airtime bought' : 'Bill paid';
+      var msg = (kind === 'send' || kind === 'send-confirm') ? 'Sent to ' + res.to : kind === 'airtime' ? 'Airtime bought' : 'Bill paid';
+      if(kind==='send-confirm')S.transferDraft=null;
       return done(msg);
     }).catch(function (e) {
       busy(form, false);
