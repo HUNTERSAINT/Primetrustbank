@@ -392,7 +392,7 @@ app.get('/api/admin/external-transfers',adminAuth,wrap(async(req,res)=>{
   const where=status==='active'?"WHERE et.status IN ('pending','processing')":status==='all'?'':"WHERE et.status=?";
   const args=status==='active'||status==='all'?[]:[status];
   const rawTransfers=await db.all("SELECT et.id,et.user_id,et.bank_name,et.account_name,et.account_number,et.amount,et.status,et.note,et.created_at,et.updated_at,et.reviewed_by,et.review_note,et.transfer_reference,u.full_name,u.email,a.account_number customer_account FROM external_transfer_requests et JOIN users u ON u.id=et.user_id JOIN accounts a ON a.user_id=et.user_id AND a.kind='user' "+where+" ORDER BY CASE et.status WHEN 'pending' THEN 0 WHEN 'processing' THEN 1 ELSE 2 END,et.created_at ASC LIMIT 250",args);
-  const transfers=rawTransfers.map(t=>{let details={};const prefix='ptb-transfer-v2:';if(String(t.note||'').startsWith(prefix)){try{details=JSON.parse(unsealKyc(t.note.slice(prefix.length))||'{}');}catch{}}return {...t,...details,note:details.memo||''};});
+  const transfers=rawTransfers.map(t=>{let details={};const prefix='ptb-transfer-v2:';if(String(t.note||'').startsWith(prefix)){try{details=JSON.parse(unsealKyc(t.note.slice(prefix.length))||'{}');}catch{}}return {...t,...details,note:details.memo||(String(t.note||'').startsWith(prefix)?'':t.note||'')};});
   const pending=(await db.get("SELECT COUNT(*) n FROM external_transfer_requests WHERE status='pending'",[])).n;
   res.json({transfers,pending});
 }));
@@ -773,7 +773,7 @@ app.post('/api/transfers', auth, requireVerified, moneyLimiter, wrap(async (req,
 
 app.get('/api/external-transfers', auth, wrap(async (req,res)=>{
   const rows=await db.all("SELECT id,bank_name,account_name,account_number,amount,status,note,created_at,updated_at,transfer_reference,review_note FROM external_transfer_requests WHERE user_id=? ORDER BY id DESC LIMIT 100", [req.user.id]);
-  const transfers=rows.map(t=>{let details={};const prefix='ptb-transfer-v2:';if(String(t.note||'').startsWith(prefix)){try{details=JSON.parse(unsealKyc(t.note.slice(prefix.length))||'{}');}catch{}}return {...t,account_number:'••••'+String(details.account_number||t.account_number||'').slice(-4),note:details.memo||''};});
+  const transfers=rows.map(t=>{let details={};const prefix='ptb-transfer-v2:';if(String(t.note||'').startsWith(prefix)){try{details=JSON.parse(unsealKyc(t.note.slice(prefix.length))||'{}');}catch{}}return {...t,account_number:'••••'+String(details.account_number||t.account_number||'').slice(-4),note:details.memo||(String(t.note||'').startsWith(prefix)?'':t.note||'')};});
   res.json({transfers});
 }));
 app.post('/api/external-transfers', auth, requireVerified, moneyLimiter, wrap(async (req,res)=>{
