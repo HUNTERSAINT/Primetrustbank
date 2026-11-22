@@ -171,3 +171,23 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 .impersonation-banner small{display:block;font-size:10px;opacity:.82;margin-top:3px}
 .impersonation-banner button{border:1px solid #ffffff70;background:#fff;color:#6e2019;border-radius:999px;padding:9px 12px;font-size:11px;font-weight:700;white-space:nowrap}
 @media(max-width:380px){.impersonation-banner{padding:10px;gap:8px}.impersonation-banner b{font-size:11px}.impersonation-banner button{padding:8px 9px;font-size:10px}}
+
+
+/* Refined motion: restrained entrance, tactile controls, and a floating card */
+.section-label{font:600 11px var(--font-display);letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin:12px 2px 0}
+.field textarea{width:100%;background:rgba(255,255,255,.07);color:var(--fg);border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:13px 14px;font:inherit;font-size:14px;resize:vertical;min-height:82px}
+.field textarea::placeholder{color:#7d6fa3}
+.screen{animation:screen-enter .38s cubic-bezier(.2,.75,.25,1) both}
+.panel,.page-link,.act i,.circ,.pillbtn,.dock button{transition:transform .22s ease,background-color .22s ease,border-color .22s ease,box-shadow .22s ease,opacity .22s ease}
+.panel{animation:panel-enter .42s cubic-bezier(.2,.75,.25,1) both}
+.tilt{animation:card-float 5.8s ease-in-out infinite}
+.pillbtn:not([disabled]):hover{transform:translateY(-2px);box-shadow:0 10px 28px rgba(0,0,0,.18)}
+.pillbtn:not([disabled]):active{transform:translateY(0) scale(.985)}
+.act:hover i,.circ:hover{transform:translateY(-2px);border-color:rgba(255,255,255,.28)}
+.page-link:hover{transform:translateX(3px);background:rgba(255,255,255,.025)}
+.dock button:active{transform:scale(.96)}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:rgba(185,161,255,.7);box-shadow:0 0 0 3px rgba(185,161,255,.1)}
+@keyframes screen-enter{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@keyframes panel-enter{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes card-float{0%,100%{translate:0 0}50%{translate:0 -7px}}
+@media(prefers-reduced-motion:reduce){.screen,.panel,.tilt{animation:none!important}.panel,.page-link,.act i,.circ,.pillbtn,.dock button{transition:none!important}}
