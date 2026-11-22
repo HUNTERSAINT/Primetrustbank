@@ -69,6 +69,26 @@ CREATE TABLE IF NOT EXISTS transactions (
 );
 CREATE INDEX IF NOT EXISTS idx_tx_account ON transactions(account_id, id DESC);
 
+CREATE TABLE IF NOT EXISTS external_transfer_requests (
+  id                 BIGSERIAL PRIMARY KEY,
+  user_id             BIGINT NOT NULL REFERENCES users(id),
+  from_account_id     BIGINT NOT NULL REFERENCES accounts(id),
+  bank_name           TEXT NOT NULL,
+  account_name         TEXT NOT NULL,
+  account_number       TEXT NOT NULL,
+  amount               BIGINT NOT NULL CHECK (amount > 0),
+  status               TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','processing','completed','rejected')),
+  note                 TEXT,
+  created_at           BIGINT NOT NULL,
+  updated_at           BIGINT NOT NULL,
+  reviewed_by           TEXT,
+  review_note           TEXT,
+  transfer_reference    TEXT,
+  hold_group_id         TEXT NOT NULL UNIQUE
+);
+CREATE INDEX IF NOT EXISTS idx_external_transfer_status ON external_transfer_requests(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_external_transfer_user ON external_transfer_requests(user_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS idempotency (
   user_id    BIGINT NOT NULL,
   key        TEXT NOT NULL,
@@ -235,7 +255,7 @@ ALTER TABLE users                 ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accounts              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cards                 ENABLE ROW LEVEL SECURITY;
 ALTER TABLE card_requests         ENABLE ROW LEVEL SECURITY;
-ALTER TABLE transactions          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transactions          ENABLE ROW LEVEL SECURITY;\nALTER TABLE external_transfer_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE idempotency           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE verification_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE admin_audit           ENABLE ROW LEVEL SECURITY;
