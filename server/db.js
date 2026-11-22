@@ -139,6 +139,21 @@ for (const column of ['id_front_data','id_back_data','selfie_data']) {
 }
 
 
+const mfaColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+if (!mfaColumns.includes('mfa_enabled')) db.exec('ALTER TABLE users ADD COLUMN mfa_enabled INTEGER NOT NULL DEFAULT 0');
+db.exec(`
+CREATE TABLE IF NOT EXISTS mfa_challenges (
+  id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  purpose TEXT NOT NULL CHECK(purpose IN ('login','enable')),
+  code_hash TEXT NOT NULL,
+  expires_at INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  used_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mfa_challenges_user ON mfa_challenges(user_id,created_at DESC);
+`);
 const sessionColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
 if (!sessionColumns.includes('session_version')) {
   db.exec('ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0');
