@@ -10,7 +10,7 @@ const db = require('./db');
 
 const PROD = process.env.NODE_ENV === 'production';
 const PORT = process.env.PORT || 3000;
-const SANDBOX_FUNDING = process.env.ALLOW_SANDBOX_FUNDING !== 'false';
+const SANDBOX_FUNDING = process.env.NODE_ENV === 'test' || process.env.ALLOW_SANDBOX_FUNDING !== 'false';
 const SESSION_HOURS = 8;
 const ADMIN_SESSION_HOURS = 4;
 
