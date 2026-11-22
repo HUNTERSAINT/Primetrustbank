@@ -206,7 +206,11 @@ function move({ from, to, amount, typeOut, typeIn, counterOut, counterIn, note }
   insTx.run(gid, d.id, typeIn, amount, d.balance, counterIn, note || null, t);
   const fromOwner=db.prepare('SELECT user_id FROM accounts WHERE id=?').get(s.id).user_id;
   const toOwner=db.prepare('SELECT user_id FROM accounts WHERE id=?').get(d.id).user_id;
-  if(fromOwner)notifyUser(fromOwner,'Transfer sent','A transfer of USD '+(amount/100).toFixed(2)+' was sent.','transfer');
+  if(fromOwner){
+    const title=typeOut==='airtime'?'Airtime purchased':typeOut==='bill'?'Bill payment sent':'Transfer sent';
+    const message=typeOut==='airtime'?'Your airtime purchase of USD '+(amount/100).toFixed(2)+' was completed.':typeOut==='bill'?'Your bill payment of USD '+(amount/100).toFixed(2)+' was submitted.':'A transfer of USD '+(amount/100).toFixed(2)+' was sent.';
+    notifyUser(fromOwner,title,message,typeOut==='transfer_out'?'transfer':'payment');
+  }
   if(toOwner)notifyUser(toOwner,'Money received','You received USD '+(amount/100).toFixed(2)+'.','transfer');
   return { group_id: gid, balance: s.balance };
 }
