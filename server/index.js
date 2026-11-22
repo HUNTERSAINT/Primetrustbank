@@ -533,7 +533,9 @@ app.post('/api/auth/register', authLimiter, wrap((req, res) => {
   const password = b.password;
   const pin = b.pin;
 
+
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em) || em.length > 120) throw httpErr(400, 'Enter a valid email address.');
+  if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(em)) throw httpErr(409, 'An account with this email already exists.');
   if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(em)) throw httpErr(409, 'An account with this email already exists.');
   if (name.length < 2 || name.length > 80) throw httpErr(400, 'Enter your full name.');
   if (typeof password !== 'string' || password.length < 12 || Buffer.byteLength(password, 'utf8') > 72) throw httpErr(400, 'Password must be at least 12 characters and no more than 72 UTF-8 bytes.');
