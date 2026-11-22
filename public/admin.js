@@ -50,12 +50,13 @@ async function users(q,status){
  $('#userStatus').value=status;
 }
 async function cardRequests(){
- const d=await api('GET','/api/admin/card-requests?status=pending'),requests=d.requests||[];
- const rows=requests.map(r=>'<tr><td>'+customer({full_name:r.full_name,email:r.email})+'</td><td><span class="small">#'+esc(r.user_id)+' · '+esc(r.account_number||'—')+'</span></td><td>'+badge(r.status)+'</td><td>'+date(r.requested_at)+'</td><td><div class="row"><button class="btn primary" data-act="issue-card" data-id="'+esc(r.user_id)+'" data-from="card-requests">Approve</button><button class="btn danger" data-act="reject-card" data-id="'+esc(r.user_id)+'" data-from="card-requests">Decline</button><button class="btn ghost" data-act="user" data-id="'+esc(r.user_id)+'">View</button></div></td></tr>').join('');
+ const d=await api('GET','/api/admin/card-requests?status=pending'),requests=d.requests||[],fee=d.physical_fee_cents||0;
+ const rows=requests.map(r=>'<tr><td>'+customer({full_name:r.full_name,email:r.email})+'</td><td><span class="small">#'+esc(r.user_id)+' · '+esc(r.account_number||'—')+'</span></td><td><b>'+esc((r.card_tier||'normal').toUpperCase())+'</b><small class="muted" style="display:block">'+(r.physical_requested?'Physical · Fee USD '+money(r.physical_fee_cents||0):'Digital only')+'</small></td><td>'+badge(r.status)+'</td><td>'+date(r.requested_at)+'</td><td><div class="row"><button class="btn primary" data-act="issue-card" data-id="'+esc(r.user_id)+'" data-from="card-requests">Approve</button><button class="btn danger" data-act="reject-card" data-id="'+esc(r.user_id)+'" data-from="card-requests">Decline</button><button class="btn ghost" data-act="user" data-id="'+esc(r.user_id)+'">View</button></div></td></tr>').join('');
  $('#cardRequestCount').textContent=d.pending||0;
- root.innerHTML=head('Card requests','Review customer card requests and approve or decline them.')+
+ root.innerHTML=head('Card requests','Manage Normal, Black and Platinum card requests, physical card pricing and delivery.')+
+ '<div class="panel section"><h2 class="title2">Physical card price</h2><p class="muted small">Set the fee charged when a customer requests a physical card. Amount is in USD.</p><form class="form" data-form="physical-card-fee"><label class="field">Physical card fee (USD)<input name="fee" type="number" min="0" max="500" step=".01" value="'+(fee/100).toFixed(2)+'" required></label><button class="btn primary">Save physical card fee</button></form></div>'+
  '<div class="grid stats">'+stat('Pending requests',d.pending||0,'Awaiting a decision')+stat('Requests shown',requests.length,'Latest pending requests')+'</div>'+
- '<div class="panel section"><div class="row space"><h2 class="title2">Pending card requests</h2><button class="btn" data-act="refresh">Refresh</button></div>'+table(['Customer','Customer / account','Status','Requested','Actions'],rows)+(rows?'':noRows('No pending card requests.'))+'</div>';
+ '<div class="panel section"><div class="row space"><h2 class="title2">Pending card requests</h2><button class="btn" data-act="refresh">Refresh</button></div>'+table(['Customer','Customer / account','Card selection','Status','Requested','Actions'],rows)+(rows?'':noRows('No pending card requests.'))+'</div>';
 }
 async function externalTransfers(){
  const d=await api('GET','/api/admin/external-transfers?status=active'),items=d.transfers||[];
@@ -182,6 +183,7 @@ root.addEventListener('input',e=>{
 root.addEventListener('submit',async e=>{
  const form=e.target.closest('form[data-form]');if(!form)return;e.preventDefault();const data=Object.fromEntries(new FormData(form));const type=form.dataset.form;
  try{
+  if(type==='physical-card-fee'){await api('PATCH','/api/admin/card-settings',{physical_card_fee_cents:Math.round(Number(data.fee)*100)});notify('Physical card fee saved.');await cardRequests();return;}
   if(type==='adjust'){const id=form.dataset.id;if(!confirm('Post this ledger adjustment?'))return;await api('POST','/api/admin/users/'+id+'/adjust-balance',data);notify('Adjustment posted to the ledger.');S.userId=Number(id);await userDetail();return;}
   if(type==='tx-filter'){S.txQuery=data.q||'';S.txType=data.type||'all';S.txFrom=data.from||'';S.txTo=data.to||'';await transactions();return;}
   if(type==='chat-reply'){const id=form.dataset.id;await api('POST','/api/admin/chat/sessions/'+id+'/reply',data);await chat();notify('Reply sent to the support conversation.');return;}
