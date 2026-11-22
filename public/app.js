@@ -277,7 +277,8 @@
       case 'transfers': html = vTransfers(); break;
       case 'payments': html = vPayments(); break;
       case 'savings': html = vSavings(); break;
-      case 'security': html = vSecurity(); break;\n      case 'support': html = vSupport(); break;
+      case 'security': html = vSecurity(); break;
+      case 'support': html = vSupport(); break;
       case 'history': html = vHistory(); break;
       case 'card': html = vCard(); break;
       default: html = vWelcome();
@@ -310,7 +311,8 @@
     var t = ev.target.closest('[data-act]'); if (!t) return;
     var a = t.dataset.act;
     if (a === 'closebg') { if (ev.target === t) { S.sheet = null; render(); } return; }
-    if (a === 'go') return go(t.dataset.v);\n    if (a === 'refresh-support') return go('support');
+    if (a === 'go') return go(t.dataset.v);
+    if (a === 'refresh-support') return go('support');
     if (a === 'sheet') return openSheet(t.dataset.s);
     if (a === 'goal') return openSheet('goal');
     if (a === 'clear-goal') { S.goal=null; try{localStorage.removeItem('ptb_goal');}catch(_){} S.sheet=null; S.view='savings'; return render(); }
@@ -355,7 +357,8 @@
     var p;
     if (kind === 'login') p = api('POST', '/api/auth/login', { email: d.email, password: d.password });
     else if (kind === 'register') p = api('POST', '/api/auth/register', d);
-    else if (kind === 'verification') p = api('POST', '/api/verification/submit', d);\n    else if (kind === 'support') p = api('POST', '/api/support/messages', {message:d.message});
+    else if (kind === 'verification') p = api('POST', '/api/verification/submit', d);
+    else if (kind === 'support') p = api('POST', '/api/support/messages', {message:d.message});
     else if (kind === 'goal') {
       var target=Number(d.target), saved=Number(d.saved);
       if (!d.name || !Number.isFinite(target) || target<=0 || !Number.isFinite(saved) || saved<0 || saved>target) { busy(form,false); setErr(form,'Enter a valid goal, target and saved amount.'); return; }
@@ -367,7 +370,8 @@
     else if (kind === 'bills') p = api('POST', '/api/bills', { biller: d.biller, reference: d.reference, amount: d.amount, pin: d.pin }, S.idem);
     else return;
     p.then(function (res) {
-      if (kind === 'support') return api('GET','/api/support/messages').then(function(d){S.support=d;render();toast('Message sent to support');});\n      if (kind === 'login' || kind === 'register' || kind === 'verification') return load().then(function () { S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; render(); toast(kind === 'verification' ? 'Submitted for administrator review' : kind === 'register' ? 'Account created' : 'Logged in'); });
+      if (kind === 'support') return api('GET','/api/support/messages').then(function(d){S.support=d;render();toast('Message sent to support');});
+      if (kind === 'login' || kind === 'register' || kind === 'verification') return load().then(function () { S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; render(); toast(kind === 'verification' ? 'Submitted for administrator review' : kind === 'register' ? 'Account created' : 'Logged in'); });
       var msg = kind === 'send' ? 'Sent to ' + res.to : kind === 'airtime' ? 'Airtime bought' : 'Bill paid';
       return done(msg);
     }).catch(function (e) {
