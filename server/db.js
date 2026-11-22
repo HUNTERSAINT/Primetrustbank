@@ -140,6 +140,10 @@ for (const column of ['id_front_data','id_back_data','selfie_data']) {
 
 
 const cardColumns = db.prepare('PRAGMA table_info(cards)').all().map((c) => c.name);
+if (!cardColumns.includes('demo_number')) db.exec('ALTER TABLE cards ADD COLUMN demo_number TEXT');
+db.exec(`CREATE TABLE IF NOT EXISTS card_requests (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL UNIQUE REFERENCES users(id),status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','granted','rejected')),requested_at INTEGER NOT NULL,reviewed_at INTEGER,reviewed_by TEXT);
+CREATE TABLE IF NOT EXISTS migration_flags (name TEXT PRIMARY KEY,completed_at INTEGER NOT NULL);`);
+if (!db.prepare('SELECT 1 FROM migration_flags WHERE name=?').get('remove-auto-demo-cards-v1')) { db.prepare('DELETE FROM cards').run(); db.prepare('INSERT INTO migration_flags (name,completed_at) VALUES (?,?)').run('remove-auto-demo-cards-v1',Date.now()); }
 if (!cardColumns.includes('activated')) db.exec('ALTER TABLE cards ADD COLUMN activated INTEGER NOT NULL DEFAULT 1');
 if (!cardColumns.includes('online_enabled')) db.exec('ALTER TABLE cards ADD COLUMN online_enabled INTEGER NOT NULL DEFAULT 1');
 if (!cardColumns.includes('international_enabled')) db.exec('ALTER TABLE cards ADD COLUMN international_enabled INTEGER NOT NULL DEFAULT 0');
