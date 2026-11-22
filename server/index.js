@@ -418,7 +418,8 @@ app.post('/api/admin/external-transfers/:id/review',adminAuth,wrap(async(req,res
   await notifyUser(result.user_id,title,message,'transfer');
   res.json({ok:true,status:decision});
 }));
-\napp.post('/api/admin/users/:id/card/issue',adminAuth,wrap(async (req,res)=>{
+
+app.post('/api/admin/users/:id/card/issue',adminAuth,wrap(async (req,res)=>{
  const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid customer ID.');
  const account=(await db.get("SELECT a.id FROM accounts a WHERE a.user_id=? AND a.kind='user'", [id]));if(!account)throw httpErr(404,'Customer account not found.');
  const rq=(await db.get("SELECT status FROM card_requests WHERE user_id=?", [id]));if(!rq||rq.status!=='pending')throw httpErr(409,'Customer must request a card before it can be granted.');
@@ -795,7 +796,8 @@ app.post('/api/external-transfers', auth, requireVerified, moneyLimiter, wrap(as
     return {ok:true,request_id:result.id,status:'pending',balance:result.balance};
   });
 }));
-\nconst BILLERS = ['Electricity', 'Cable TV', 'Internet', 'Water', 'School fees'];
+
+const BILLERS = ['Electricity', 'Cable TV', 'Internet', 'Water', 'School fees'];
 const NETWORKS = ['MTN', 'Airtel', 'Glo', '9mobile'];
 
 // Airtime purchase removed from this demo app.
