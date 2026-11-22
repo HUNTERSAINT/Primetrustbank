@@ -609,7 +609,7 @@ app.post('/api/auth/login', authLimiter, wrap((req, res) => {
 
 app.post('/api/auth/password-reset/request',authLimiter,wrap(async (req,res)=>{
   const email=String((req.body||{}).email||'').trim().toLowerCase();
-  if(!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)||email.length>120)throw httpErr(400,'Enter a valid email address.');
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>120)throw httpErr(400,'Enter a valid email address.');
   const apiKey=process.env.RESEND_API_KEY,from=process.env.RESEND_FROM_EMAIL||process.env.EMAIL_FROM;
   if(!apiKey||!from)throw httpErr(503,'Password recovery email is not configured.');
   const user=db.prepare('SELECT id,full_name,email FROM users WHERE email=?').get(email);
@@ -617,10 +617,10 @@ app.post('/api/auth/password-reset/request',authLimiter,wrap(async (req,res)=>{
     const raw=crypto.randomBytes(32).toString('base64url'),hash=crypto.createHash('sha256').update(raw).digest('hex'),created=now(),expires=created+30*60*1000;
     db.prepare('UPDATE password_reset_tokens SET used_at=? WHERE user_id=? AND used_at IS NULL').run(created,user.id);
     db.prepare('INSERT INTO password_reset_tokens (user_id,token_hash,expires_at,created_at) VALUES (?,?,?,?)').run(user.id,hash,expires,created);
-    const base=String(process.env.PUBLIC_APP_URL||req.protocol+'://'+req.get('host')).replace(/\\/$/,'');
+    const base=String(process.env.PUBLIC_APP_URL||req.protocol+'://'+req.get('host')).replace(/\/$/,'');
     const link=base+'/?reset='+encodeURIComponent(raw);
     const safeName=String(user.full_name).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-    const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({from,to:[user.email],subject:'Reset your Prime Trust password',text:'Hello '+user.full_name+',\\n\\nUse this link to reset your password within 30 minutes: '+link+'\\n\\nIf you did not request this, ignore this email.',html:'<p>Hello '+safeName+',</p><p>Use this link to reset your Prime Trust password. It expires in 30 minutes.</p><p><a href="'+link+'">Reset password</a></p><p>If you did not request this, ignore this email.</p>'})});
+    const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({from,to:[user.email],subject:'Reset your Prime Trust password',text:'Hello '+user.full_name+',\n\nUse this link to reset your password within 30 minutes: '+link+'\n\nIf you did not request this, ignore this email.',html:'<p>Hello '+safeName+',</p><p>Use this link to reset your Prime Trust password. It expires in 30 minutes.</p><p><a href="'+link+'">Reset password</a></p><p>If you did not request this, ignore this email.</p>'})});
     if(!response.ok){db.prepare('UPDATE password_reset_tokens SET used_at=? WHERE token_hash=?').run(now(),hash);throw httpErr(502,'Could not send password recovery email. Try again later.');}
   }
   res.json({ok:true,message:'If the account exists, password recovery instructions have been sent.'});
