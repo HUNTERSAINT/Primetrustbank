@@ -132,4 +132,10 @@ CREATE TABLE IF NOT EXISTS support_messages (
 CREATE INDEX IF NOT EXISTS idx_support_messages_session ON support_messages(session_id,id);
 `);
 
+
+const verificationColumns = db.prepare('PRAGMA table_info(verification_requests)').all().map((c) => c.name);
+for (const column of ['id_front_data','id_back_data','selfie_data']) {
+  if (!verificationColumns.includes(column)) db.exec('ALTER TABLE verification_requests ADD COLUMN ' + column + ' TEXT');
+}
+
 module.exports = db;
