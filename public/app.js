@@ -25,7 +25,7 @@
   var goalData = null; try { goalData = JSON.parse(localStorage.getItem('ptb_goal') || 'null'); } catch (_) {}
   var resetToken = new URLSearchParams(window.location.search).get('reset') || '';
   var mfaChallengeId = '';
-  var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, selectedTx: null, statementFrom: '', statementTo: '', transferDraft: null, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], sessions: [], impersonation: { active: false } };
+  var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, selectedTx: null, statementFrom: '', statementTo: '', transferDraft: null, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], sessions: [], impersonation: { active: false }, cardReveal: null };
 
   // ---------- api ----------
   function api(method, url, body, idem) {
@@ -341,13 +341,9 @@
     return sheetWrap('Disable sign-in verification','<form class="form" data-form="mfa-disable"><p class="lead">Confirm your password and transaction PIN to turn off this protection.</p><label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label><label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label><p class="err" role="alert"></p><button class="pillbtn d" type="submit">Disable MFA</button></form>');
   }
   function sDetails() {
-    var me = S.me;
-    return sheetWrap('Card details',
-      '<div class="kv"><span>Card holder</span><b>' + esc(me.name) + '</b></div>' +
-      '<div class="kv"><span>Card number</span><b>•••• •••• •••• ' + esc(me.card.last4) + '</b></div>' +
-      '<div class="kv"><span>Expires</span><b>' + esc(me.card.expiry) + '</b></div>' +
-      '<div class="kv"><span>Status</span><b>' + (me.card.frozen ? 'Frozen' : 'Active') + '</b></div>' +
-      '<div class="kv"><span>Linked account</span><b>' + esc(me.account.number) + '</b></div>' + '<p class="hint">Full demo card number is restricted to administrator view. CVV is never stored.</p>');
+    var me=S.me, c=S.cardReveal;
+    if(!c) return sheetWrap('Reveal card details','<p class="lead">Enter your transaction PIN to view your complete demo card information, including the CVV.</p><form class="form" data-form="card-reveal"><label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" autocomplete="off" required></label><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Verify PIN & reveal</button></form><p class="hint">Card details stay hidden until your PIN is verified.</p>');
+    return sheetWrap('Card details','<div class="kv"><span>Card holder</span><b>'+esc(me.name)+'</b></div><div class="kv"><span>Card number</span><b class="card-secret">'+esc(c.number)+'</b></div><div class="kv"><span>Expires</span><b>'+esc(c.expiry)+'</b></div><div class="kv"><span>CVV</span><b class="card-secret">'+esc(c.cvv)+'</b></div><div class="kv"><span>Status</span><b>'+(me.card.frozen?'Frozen':'Active')+'</b></div><div class="kv"><span>Linked account</span><b>'+esc(me.account.number)+'</b></div><p class="hint">Synthetic demo card details only; not a real payment card.</p><button class="pillbtn d" data-act="hide-card-details">Hide card details</button>');
   }
   function sProfile() {
     var me = S.me;
@@ -463,7 +459,7 @@
   app.addEventListener('click', function (ev) {
     var t = ev.target.closest('[data-act]'); if (!t) return;
     var a = t.dataset.act;
-    if (a === 'closebg') { if (ev.target === t) { S.sheet = null; render(); } return; }
+    if (a === 'closebg') { if (ev.target === t) { S.sheet = null; S.cardReveal=null; render(); } return; }
     if (a === 'go') return go(t.dataset.v);
     if (a === 'transaction') { S.selectedTx=S.txs.find(function(x){return String(x.id||x.transaction_id||x.reference||'')===String(t.dataset.id);})||null; return go('transaction-detail'); }
     if (a === 'clear-statement') { S.statementFrom='';S.statementTo='';return render(); }
@@ -471,11 +467,12 @@
     if (a === 'receipt-download') { if(!S.selectedTx)return; var q=S.selectedTx, amount=(q.amount>=0?'+':'-')+' USD '+money(Math.abs(q.amount)); var body='PRIME TRUST BANK\nTRANSACTION RECEIPT\n\nAmount: '+amount+'\nStatus: '+(q.status||'Successful')+'\nDate: '+new Date(q.created_at).toLocaleString()+'\nDescription: '+(q.counterparty||'—')+'\nReference: '+(q.reference||q.id||'—')+'\n'+(q.note?'Note: '+q.note+'\n':'')+'\nDemo receipt — not a proof of real funds.'; var blob=new Blob([body],{type:'text/plain;charset=utf-8'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='prime-trust-receipt-'+String(q.id||'transaction')+'.txt';link.click();setTimeout(function(){URL.revokeObjectURL(url);},1000);toast('Receipt downloaded');return; }
     if (a === 'refresh-support') return go('support');
     if (a === 'return-admin') { if(!confirm('End this customer session and return to the admin console?'))return; api('POST','/api/admin/impersonate-return',{}).then(function(){window.location.href='/api/admin/portal';}).catch(function(e){toast(e.message);}); return; }
-    if (a === 'sheet') return openSheet(t.dataset.s);
+    if (a === 'sheet') { if(t.dataset.s==='details')S.cardReveal=null; return openSheet(t.dataset.s); }
+    if (a === 'hide-card-details') { S.cardReveal=null; S.sheet='details'; render(); return; }
     if (a === 'request-card') { if(!confirm('Submit a request for a demo card? An administrator must approve it first.'))return; t.disabled=true; api('POST','/api/card/request',{}).then(function(){return load();}).then(function(){S.view='card';render();toast('Card request submitted');}).catch(function(e){t.disabled=false;toast(e.message);}); return; }
     if (a === 'goal') return openSheet('goal');
     if (a === 'clear-goal') { S.goal=null; try{localStorage.removeItem('ptb_goal');}catch(_){} S.sheet=null; S.view='savings'; return render(); }
-    if (a === 'close') { S.sheet = null; return render(); }
+    if (a === 'close') { S.sheet = null; S.cardReveal=null; return render(); }
     if (a === 'toast') return toast(t.dataset.m);
 
     if (a === 'mark-notification') { api('POST','/api/notifications/'+t.dataset.id+'/read',{}).then(function(){return load();}).then(render).catch(function(e){toast(e.message);}); return; }
@@ -533,6 +530,7 @@
     if (kind === 'card-settings') p=api('PATCH','/api/card/settings',{activated:d.activated==='on',online_enabled:d.online_enabled==='on',international_enabled:d.international_enabled==='on',daily_limit:Math.round(Number(d.daily_limit)*100),transaction_pin:d.transaction_pin});
     else if (kind === 'card-pin') p=api('POST','/api/card/pin',{card_pin:d.card_pin,transaction_pin:d.transaction_pin});
     else if (kind === 'card-replace') p=api('POST','/api/card/replace',{transaction_pin:d.transaction_pin});
+    else if (kind === 'card-reveal') p=api('POST','/api/card/details',{pin:d.pin});
     if (kind === 'mfa-login') p=api('POST','/api/auth/mfa/verify',{challenge_id:mfaChallengeId,code:d.code});
     else if (kind === 'mfa-setup') p=api('POST','/api/security/mfa/confirm',{challenge_id:mfaChallengeId,code:d.code});
     else if (kind === 'mfa-disable') p=api('POST','/api/security/mfa/disable',{password:d.password,pin:d.pin});
@@ -580,6 +578,7 @@
     else return;
     p.then(function (res) {
       if (kind === 'login' && res.mfa_required) { mfaChallengeId=res.challenge_id;S.view='mfa-login';render();toast('Check your email for the sign-in code');return; }
+      if (kind === 'card-reveal') { S.cardReveal=res.card; S.sheet='details'; render(); return; }
       if (kind === 'card-settings') return load().then(function(){S.view='card';render();toast('Card controls updated');});
       if (kind === 'card-pin') return load().then(function(){S.view='card';render();toast('Card PIN saved');});
       if (kind === 'card-replace') return load().then(function(){S.sheet=null;S.view='card';render();toast('Demo card replaced. Activate it and set a new PIN.');});
