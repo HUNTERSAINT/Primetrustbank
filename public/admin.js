@@ -62,7 +62,7 @@ async function kyc(){
  $('#kycCount').textContent=rows.filter(x=>x.review_status==='submitted').length;
  root.innerHTML=head('Identity review','Review customer identity information. Verification is handled by an administrator; no SSN or ITIN collection.')+
  '<div class="tabs">'+[['pending','Pending'],['approved','Approved'],['rejected','Rejected'],['all','All']].map(x=>'<button class="tab '+(S.kycStatus===x[0]?'active':'')+'" data-act="kyc-filter" data-status="'+x[0]+'">'+x[1]+'</button>').join('')+'</div>'+
- (rows.map(v=>'<div class="panel kyccard"><div><div class="row space"><div><h3>'+esc(v.legal_name)+'</h3><div class="muted small">'+esc(v.full_name)+' · '+esc(v.email)+' · Account '+esc(v.account_number)+'</div></div>'+badge(v.review_status)+'</div><dl><dt>Date of birth</dt><dd>'+esc(v.date_of_birth)+'</dd><dt>Address</dt><dd>'+esc(v.address)+'</dd><dt>Government ID type</dt><dd>'+esc(v.id_type)+'</dd><dt>Submitted</dt><dd>'+date(v.submitted_at)+'</dd><dt>Admin note</dt><dd>'+esc(v.admin_note||'—')+'</dd></dl></div>'+(v.review_status==='submitted'?'<div class="actions"><textarea data-note="'+v.id+'" placeholder="Internal review note (optional)"></textarea><button class="btn good" data-act="kyc-review" data-id="'+v.id+'" data-decision="approved">Approve</button><button class="btn danger" data-act="kyc-review" data-id="'+v.id+'" data-decision="rejected">Reject</button></div>':'<div class="actions"><span class="muted small">Reviewed '+date(v.reviewed_at)+'</span></div>')+'</div>').join('')||'<div class="panel">'+noRows('No '+S.kycStatus+' identity submissions.')+'</div>');
+ (rows.map(v=>'<div class="panel kyccard"><div><div class="row space"><div><h3>'+esc(v.legal_name)+'</h3><div class="muted small">'+esc(v.full_name)+' · '+esc(v.email)+' · Account '+esc(v.account_number)+'</div></div>'+badge(v.review_status)+'</div><dl><dt>Date of birth</dt><dd>'+esc(v.date_of_birth)+'</dd><dt>Address</dt><dd>'+esc(v.address)+'</dd><dt>Government ID type</dt><dd>'+esc(v.id_type)+'</dd><dt>Submitted</dt><dd>'+date(v.submitted_at)+'</dd><dt>Admin note</dt><dd>'+esc(v.admin_note||'—')+'</dd></dl></div>'+(v.review_status==='submitted'?'<div class="actions"><button class="btn" data-act="kyc-docs" data-id="'+v.id+'">View ID documents</button><textarea data-note="'+v.id+'" placeholder="Internal review note (optional)"></textarea><button class="btn good" data-act="kyc-review" data-id="'+v.id+'" data-decision="approved">Approve</button><button class="btn danger" data-act="kyc-review" data-id="'+v.id+'" data-decision="rejected">Reject</button></div>':'<div class="actions"><span class="muted small">Reviewed '+date(v.reviewed_at)+'</span></div>')+'</div>').join('')||'<div class="panel">'+noRows('No '+S.kycStatus+' identity submissions.')+'</div>');
 }
 async function transactions(){
  const d=await api('GET','/api/admin/transactions?q='+encodeURIComponent(S.txQuery)+'&type='+encodeURIComponent(S.txType)+(S.txFrom?'&from='+new Date(S.txFrom+'T00:00:00').getTime():'')+(S.txTo?'&to='+(new Date(S.txTo+'T23:59:59').getTime()):'')+'&limit=250');
@@ -96,11 +96,17 @@ async function audit(){
  const d=await api('GET','/api/admin/audit?limit=250'),rows=(d.events||[]).map(a=>'<tr><td>#'+a.id+'</td><td>'+date(a.created_at)+'</td><td>'+esc(a.admin_email)+'</td><td>'+esc(a.action)+'</td><td>'+(a.target_user_id?'<button class="btn" data-act="user" data-id="'+a.target_user_id+'">Customer #'+a.target_user_id+'</button>':'—')+'</td><td>'+(a.amount==null?'—':money(a.amount))+'</td><td>'+esc(a.details||'—')+'</td></tr>').join('');
  root.innerHTML=head('Admin activity','Audit trail of administrator actions and account changes.')+'<div class="panel">'+table(['ID','Time','Admin','Action','Customer','Amount','Details'],rows)+(rows?'':noRows('No admin activity recorded.'))+'</div>';
 }
+function showDocs(id,docs){
+ const files=[['front','Front of ID'],['back','Back of ID'],['selfie','Selfie']].filter(x=>docs[x[0]]);
+ const overlay=document.createElement('div');overlay.className='docmodal';overlay.innerHTML='<div class="docpanel"><div class="row space"><h2 class="title2">Identity documents · Request #'+id+'</h2><button class="btn" data-act="close-docs">Close</button></div>'+files.map(x=>'<section class="docimage"><h3>'+x[1]+'</h3><img src="'+esc(docs[x[0]])+'" alt="'+x[1]+'"><a class="btn" href="'+esc(docs[x[0]])+'" download="prime-trust-kyc-'+id+'-'+x[0]+'.jpg">Download image</a></section>').join('')+(files.length?'':'<p class="muted">No document images were attached.</p>')+'</div>';
+ root.appendChild(overlay);
+}
 function setPage(page){if(page==='user-detail')S.page='user-detail';else S.page=page;renderNav();renderPage().catch(e=>{root.innerHTML='<div class="panel">'+esc(e.message)+'</div>';});}
 function downloadCsv(){
  const rows=S.txRows||[];const cols=['id','full_name','email','account_number','type','amount','balance_after','counterparty','note','created_at'];
  const quote=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
- const csv=[cols.join(','),...rows.map(r=>cols.map(k=>quote(k==='amount'?Number(r[k])/100:k==='balance_after'?Number(r[k])/100:r[k])).join(','))].join('\r\n');
+ const csv=[cols.join(','),...rows.map(r=>cols.map(k=>quote(k==='amount'?Number(r[k])/100:k==='balance_after'?Number(r[k])/100:r[k])).join(','))].join('\r
+');
  const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})),a=document.createElement('a');a.href=url;a.download='prime-trust-transactions.csv';a.click();URL.revokeObjectURL(url);
 }
 $('#loginForm').addEventListener('submit',async e=>{e.preventDefault();$('#loginErr').textContent='';const d=Object.fromEntries(new FormData(e.target));try{await api('POST','/api/admin/login',d);showWorkspace(true);await go('overview');}catch(err){$('#loginErr').textContent=err.message;}});
@@ -115,6 +121,9 @@ root.addEventListener('click',async e=>{
   if(a==='user'){S.userId=Number(b.dataset.id);setPage('user-detail');return;}
   if(a==='status'){const status=b.dataset.status;if(!confirm('Set this customer account to '+status+'?'))return;await api('PATCH','/api/admin/users/'+b.dataset.id,{status,reason:'Admin account status update'});notify('Customer status updated.');await userDetail();return;}
   if(a==='kyc-filter'){S.kycStatus=b.dataset.status;await kyc();return;}
+  if(a==='kyc-docs'){const d=await api('GET','/api/admin/requests/'+b.dataset.id);showDocs(b.dataset.id,d.documents||{});return;}
+  if(a==='close-docs'){const modal=b.closest('.docmodal');if(modal)modal.remove();return;}
+  if(a==='card'){const frozen=b.dataset.frozen==='true';if(!confirm((frozen?'Freeze':'Unfreeze')+' this customer card?'))return;await api('PATCH','/api/admin/users/'+b.dataset.id+'/card',{frozen});notify(frozen?'Customer card frozen.':'Customer card unfrozen.');await userDetail();return;}
   if(a==='kyc-review'){const decision=b.dataset.decision,id=b.dataset.id;if(!confirm((decision==='approved'?'Approve':'Reject')+' this identity verification?'))return;b.disabled=true;const note=$('[data-note="'+id+'"]').value;await api('POST','/api/admin/requests/'+id+'/review',{decision,note});notify('Identity review updated.');await kyc();return;}
   if(a==='csv'){downloadCsv();return;}
   if(a==='chat-select'){S.chatId=Number(b.dataset.id);await chat();return;}
