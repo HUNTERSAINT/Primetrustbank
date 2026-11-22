@@ -212,9 +212,9 @@ async function move({ from, to, amount, typeOut, typeIn, counterOut, counterIn, 
   const fromOwner=(await db.get('SELECT user_id FROM accounts WHERE id=?', [s.id])).user_id;
   const toOwner=(await db.get('SELECT user_id FROM accounts WHERE id=?', [d.id])).user_id;
   if(fromOwner){
-    const title=typeOut==='airtime'?'Airtime purchased':typeOut==='bill'?'Bill payment sent':'Transfer sent';
-    const message=typeOut==='airtime'?'Your airtime purchase of USD '+(amount/100).toFixed(2)+' was completed.':typeOut==='bill'?'Your bill payment of USD '+(amount/100).toFixed(2)+' was submitted.':'A transfer of USD '+(amount/100).toFixed(2)+' was sent.';
-    await notifyUser(fromOwner,title,message,typeOut==='transfer_out'?'transfer':'payment');
+    const title=typeOut==='airtime'?'Airtime purchased':typeOut==='bill'?'Bill payment sent':typeOut==='external_transfer_pending'?'External transfer requested':'Transfer sent';
+    const message=typeOut==='airtime'?'Your airtime purchase of USD '+(amount/100).toFixed(2)+' was completed.':typeOut==='bill'?'Your bill payment of USD '+(amount/100).toFixed(2)+' was submitted.':typeOut==='external_transfer_pending'?'Your external transfer request for USD '+(amount/100).toFixed(2)+' was submitted. Funds are reserved while an administrator processes it.':'A transfer of USD '+(amount/100).toFixed(2)+' was sent.';
+    await notifyUser(fromOwner,title,message,typeOut==='transfer_out'?'transfer':typeOut==='external_transfer_pending'?'transfer':'payment');
   }
   if(toOwner)await notifyUser(toOwner,'Money received','You received USD '+(amount/100).toFixed(2)+'.','transfer');
   return { group_id: gid, balance: s.balance };
@@ -386,7 +386,39 @@ app.post('/api/admin/users/:id/adjust-balance', adminAuth, wrap(async (req,res)=
   res.json({ok:true,balance:result.balance});
 }));
 
-app.post('/api/admin/users/:id/card/issue',adminAuth,wrap(async (req,res)=>{
+app.get('/api/admin/external-transfers',adminAuth,wrap(async(req,res)=>{
+  const status=String(req.query.status||'active');
+  if(!['active','all','pending','processing','completed','rejected'].includes(status))throw httpErr(400,'Invalid external transfer status.');
+  const where=status==='active'?"WHERE et.status IN ('pending','processing')":status==='all'?'':"WHERE et.status=?";
+  const args=status==='active'||status==='all'?[]:[status];
+  const transfers=await db.all("SELECT et.id,et.user_id,et.bank_name,et.account_name,et.account_number,et.amount,et.status,et.note,et.created_at,et.updated_at,et.reviewed_by,et.review_note,et.transfer_reference,u.full_name,u.email,a.account_number customer_account FROM external_transfer_requests et JOIN users u ON u.id=et.user_id JOIN accounts a ON a.user_id=et.user_id AND a.kind='user' "+where+" ORDER BY CASE et.status WHEN 'pending' THEN 0 WHEN 'processing' THEN 1 ELSE 2 END,et.created_at ASC LIMIT 250",args);
+  const pending=(await db.get("SELECT COUNT(*) n FROM external_transfer_requests WHERE status='pending'",[])).n;
+  res.json({transfers,pending});
+}));
+app.post('/api/admin/external-transfers/:id/review',adminAuth,wrap(async(req,res)=>{
+  const id=Number(req.params.id),body=req.body||{},decision=String(body.status||''),reference=String(body.transfer_reference||'').trim().slice(0,100),note=String(body.review_note||'').trim().slice(0,240);
+  if(!Number.isSafeInteger(id)||id<1||!['processing','completed','rejected'].includes(decision))throw httpErr(400,'Choose a valid transfer decision.');
+  if(decision==='completed'&&reference.length<4)throw httpErr(400,'Enter the real bank transfer reference before marking this transfer completed.');
+  if(decision==='rejected'&&note.length<3)throw httpErr(400,'Enter a reason for rejecting this transfer.');
+  const result=await db.tx(async()=>{
+    const item=await db.get('SELECT * FROM external_transfer_requests WHERE id=? FOR UPDATE',[id]);
+    if(!item)throw httpErr(404,'External transfer request not found.');
+    if(!['pending','processing'].includes(item.status))throw httpErr(409,'This request has already been finalized.');
+    if(decision==='rejected'){
+      const from=await db.get('SELECT * FROM accounts WHERE id=?',[item.from_account_id]),hold=await db.get("SELECT * FROM accounts WHERE account_number='SYS-EXTERNAL-TRANSFERS' AND kind='system'");
+      if(!from||!hold)throw httpErr(500,'Unable to return the reserved funds.');
+      await move({from:hold,to:from,amount:item.amount,typeOut:'external_transfer_refund',typeIn:'external_transfer_refund_in',counterOut:'External transfer refund',counterIn:'Transfer request refund',note:'Refund for external transfer request #'+id});
+    }
+    await db.run('UPDATE external_transfer_requests SET status=?,updated_at=?,reviewed_by=?,review_note=?,transfer_reference=? WHERE id=?',[decision,now(),String(req.admin.email||'admin'),note||null,decision==='completed'?reference:item.transfer_reference,id]);
+    await auditAdmin(req,'EXTERNAL_TRANSFER_'+decision.toUpperCase(),item.user_id,item.amount,'Request #'+id+(note?' · '+note:'')+(reference?' · Reference '+reference:''));
+    return item;
+  });
+  const title=decision==='completed'?'External transfer completed':decision==='rejected'?'External transfer declined':'External transfer processing';
+  const message=decision==='completed'?'Your external transfer has been marked completed by the administrator. Bank reference: '+reference:decision==='rejected'?'Your external transfer request was declined. The reserved amount has been returned to your account. Reason: '+note:'Your external transfer request is now being processed by an administrator.';
+  await notifyUser(result.user_id,title,message,'transfer');
+  res.json({ok:true,status:decision});
+}));
+\napp.post('/api/admin/users/:id/card/issue',adminAuth,wrap(async (req,res)=>{
  const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid customer ID.');
  const account=(await db.get("SELECT a.id FROM accounts a WHERE a.user_id=? AND a.kind='user'", [id]));if(!account)throw httpErr(404,'Customer account not found.');
  const rq=(await db.get("SELECT status FROM card_requests WHERE user_id=?", [id]));if(!rq||rq.status!=='pending')throw httpErr(409,'Customer must request a card before it can be granted.');
@@ -737,7 +769,33 @@ app.post('/api/transfers', auth, requireVerified, moneyLimiter, wrap(async (req,
   });
 }));
 
-const BILLERS = ['Electricity', 'Cable TV', 'Internet', 'Water', 'School fees'];
+app.get('/api/external-transfers', auth, wrap(async (req,res)=>{
+  const transfers=await db.all("SELECT id,bank_name,account_name,account_number,amount,status,note,created_at,updated_at,transfer_reference,review_note FROM external_transfer_requests WHERE user_id=? ORDER BY id DESC LIMIT 100", [req.user.id]);
+  res.json({transfers});
+}));
+app.post('/api/external-transfers', auth, requireVerified, moneyLimiter, wrap(async (req,res)=>{
+  await idempotent(req,res,async()=>{
+    const body=req.body||{},bank=String(body.bank_name||'').trim().slice(0,100),name=String(body.account_name||'').trim().slice(0,100),accountNumber=String(body.account_number||'').trim(),note=String(body.note||'').replace(/[|\r\n]/g,' ').slice(0,100);
+    const amount=cents(body.amount);
+    if(bank.length<2||name.length<2||!/^[0-9]{6,34}$/.test(accountNumber))throw httpErr(400,'Enter a valid destination bank, account name and account number.');
+    if(!amount||amount>1000000*100)throw httpErr(400,'Enter a valid transfer amount.');
+    const userLimit=await db.get('SELECT daily_transfer_limit FROM account_limits WHERE user_id=?',[req.user.id]),tier=kyc.tierOf(req.user);
+    if(amount>tier.per_transaction)throw httpErr(422,'This amount is above the limit for your verification level ('+tier.name+').');
+    const dailyLimit=Math.min(userLimit?userLimit.daily_transfer_limit:500000,tier.daily_transfer);
+    if(amount>dailyLimit||(await transferDailyTotal(req.user.id))+amount>dailyLimit)throw httpErr(422,'Your daily transfer limit would be exceeded.');
+    await verifyPin(req.user,body.pin);
+    const result=await db.tx(async()=>{
+      const from=await getUserAccount(req.user.id),hold=await db.get("SELECT * FROM accounts WHERE account_number='SYS-EXTERNAL-TRANSFERS' AND kind='system'");
+      if(!from||!hold)throw httpErr(500,'External transfer processing account is unavailable.');
+      const movement=await move({from,to:hold,amount,typeOut:'external_transfer_pending',typeIn:'external_transfer_hold',counterOut:bank+' · '+name,counterIn:'External transfer funds held',note:'External transfer to '+bank+' · '+accountNumber+(note?' | '+note:'')});
+      const t=now(),insert=await db.run("INSERT INTO external_transfer_requests (user_id,from_account_id,bank_name,account_name,account_number,amount,status,note,created_at,updated_at,hold_group_id) VALUES (?,?,?,?,?,?,'pending',?,?,?,?,?)",[req.user.id,from.id,bank,name,accountNumber,amount,note||null,t,t,movement.group_id]);
+      return {id:insert.lastInsertRowid,balance:movement.balance};
+    });
+    await notifyUser(req.user.id,'External transfer pending','Your request to '+bank+' is awaiting administrator processing. The amount is reserved; the transfer is not yet complete.','transfer');
+    return {ok:true,request_id:result.id,status:'pending',balance:result.balance};
+  });
+}));
+\nconst BILLERS = ['Electricity', 'Cable TV', 'Internet', 'Water', 'School fees'];
 const NETWORKS = ['MTN', 'Airtel', 'Glo', '9mobile'];
 
 // Airtime purchase removed from this demo app.
@@ -878,7 +936,7 @@ async function notifyUser(userId,title,message,category='account'){
 async function getUserAccount(userId){return (await db.get("SELECT * FROM accounts WHERE user_id=? AND kind='user'", [userId]));}
 async function transferDailyTotal(userId){
   const start=new Date();start.setHours(0,0,0,0);
-  return (await db.get("SELECT COALESCE(SUM(-amount),0) total FROM transactions WHERE account_id=(SELECT id FROM accounts WHERE user_id=? AND kind='user') AND type='transfer_out' AND created_at>=?", [userId,start.getTime()])).total;
+  return (await db.get("SELECT COALESCE(SUM(-amount),0) total FROM transactions WHERE account_id=(SELECT id FROM accounts WHERE user_id=? AND kind='user') AND type IN ('transfer_out','external_transfer_pending') AND created_at>=?", [userId,start.getTime()])).total;
 }
 async function processDueTransfers(userId){
   const due=(await db.all("SELECT * FROM scheduled_transfers WHERE user_id=? AND status='scheduled' AND scheduled_at<=? ORDER BY scheduled_at LIMIT 10", [userId,now()]));
