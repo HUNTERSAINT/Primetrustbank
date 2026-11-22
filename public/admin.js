@@ -19,6 +19,7 @@ async function go(page){S.page=page;renderNav();root.innerHTML='<div class="pane
 async function renderPage(){
  if(S.page==='overview')return overview();
  if(S.page==='users')return users();
+ if(S.page==='card-requests')return cardRequests();
  if(S.page==='user-detail')return userDetail();
  if(S.page==='kyc')return kyc();
  if(S.page==='transactions')return transactions();
@@ -46,6 +47,14 @@ async function users(q,status){
  '<div class="panel"><div class="toolbar"><div class="searchwrap"><input class="search" id="userSearch" value="'+esc(q)+'" placeholder="Search name, email or account number"></div><select class="filter" id="userStatus" style="max-width:150px"><option value="all">All statuses</option><option value="active">Active</option><option value="suspended">Suspended</option></select><span class="muted small">'+d.total+' customers</span></div>'+
  table(['Customer','Account number','Status','Identity','Balance','Joined',''],rows)+(rows?'':noRows('No matching customers.'))+'</div>';
  $('#userStatus').value=status;
+}
+async function cardRequests(){
+ const d=await api('GET','/api/admin/card-requests?status=pending'),requests=d.requests||[];
+ const rows=requests.map(r=>'<tr><td>'+customer({full_name:r.full_name,email:r.email})+'</td><td><span class="small">#'+esc(r.user_id)+' · '+esc(r.account_number||'—')+'</span></td><td>'+badge(r.status)+'</td><td>'+date(r.requested_at)+'</td><td><div class="row"><button class="btn primary" data-act="issue-card" data-id="'+esc(r.user_id)+'" data-from="card-requests">Approve</button><button class="btn danger" data-act="reject-card" data-id="'+esc(r.user_id)+'" data-from="card-requests">Decline</button><button class="btn ghost" data-act="user" data-id="'+esc(r.user_id)+'">View</button></div></td></tr>').join('');
+ $('#cardRequestCount').textContent=d.pending||0;
+ root.innerHTML=head('Card requests','Review customer card requests and approve or decline them.')+
+ '<div class="grid stats">'+stat('Pending requests',d.pending||0,'Awaiting a decision')+stat('Requests shown',requests.length,'Latest pending requests')+'</div>'+
+ '<div class="panel section"><div class="row space"><h2 class="title2">Pending card requests</h2><button class="btn" data-act="refresh">Refresh</button></div>'+table(['Customer','Customer / account','Status','Requested','Actions'],rows)+(rows?'':noRows('No pending card requests.'))+'</div>';
 }
 async function userDetail(){
  const d=await api('GET','/api/admin/users/'+S.userId),u=d.user;
@@ -137,8 +146,8 @@ root.addEventListener('click',async e=>{
   if(a==='kyc-docs'){const d=await api('GET','/api/admin/requests/'+b.dataset.id);showDocs(b.dataset.id,d.documents||{},d.id_number);return;}
   if(a==='close-docs'){const modal=b.closest('.docmodal');if(modal)modal.remove();return;}
   if(a==='card'){const frozen=b.dataset.frozen==='true';if(!confirm((frozen?'Freeze':'Unfreeze')+' this customer card?'))return;await api('PATCH','/api/admin/users/'+b.dataset.id+'/card',{frozen});notify(frozen?'Customer card frozen.':'Customer card unfrozen.');await userDetail();return;}
-  if(a==='issue-card'){if(!confirm('Issue a card to this customer who requested one?'))return;await api('POST','/api/admin/users/'+b.dataset.id+'/card/issue',{});notify('Card issued. Card number is shown in this profile.');await userDetail();return;}
-  if(a==='reject-card'){if(!confirm('Reject this customer card request?'))return;await api('POST','/api/admin/users/'+b.dataset.id+'/card/reject',{});notify('Card request rejected.');await userDetail();return;}
+  if(a==='issue-card'){if(!confirm('Approve this card request and grant the requested card?'))return;await api('POST','/api/admin/users/'+b.dataset.id+'/card/issue',{});notify('Card request approved.');if(b.dataset.from==='card-requests')await cardRequests();else await userDetail();return;}
+  if(a==='reject-card'){if(!confirm('Decline this customer card request?'))return;await api('POST','/api/admin/users/'+b.dataset.id+'/card/reject',{});notify('Card request declined.');if(b.dataset.from==='card-requests')await cardRequests();else await userDetail();return;}
   if(a==='kyc-review'){const decision=b.dataset.decision,id=b.dataset.id;if(!confirm((decision==='approved'?'Approve':'Reject')+' this identity verification?'))return;b.disabled=true;const note=$('[data-note="'+id+'"]').value;await api('POST','/api/admin/requests/'+id+'/review',{decision,note,tier:Number(b.dataset.tier||1)});notify('Identity review updated.');await kyc();return;}
   if(a==='kyc-upgrade'){const decision=b.dataset.decision,id=b.dataset.id;if(!confirm((decision==='approved'?'Approve':'Reject')+' this proof of address?'))return;b.disabled=true;const note=$('[data-note="'+id+'"]').value;await api('POST','/api/admin/requests/'+id+'/upgrade-review',{decision,note});notify('Proof of address updated.');await kyc();return;}
   if(a==='dispute-status'){const status=b.dataset.status;if(!confirm('Mark dispute #'+b.dataset.id+' as '+status+'?'))return;await api('PATCH','/api/admin/disputes/'+b.dataset.id,{status});notify('Dispute status updated.');await disputes();return;}
