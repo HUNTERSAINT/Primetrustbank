@@ -154,4 +154,58 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
 CREATE INDEX IF NOT EXISTS idx_admin_sessions_expiry ON admin_sessions(expires_at);
 `);
 
+
+/* Customer self-service expansion: durable notifications, disputes, saved recipients,
+   scheduled transfers and account controls. */
+db.exec(`
+CREATE TABLE IF NOT EXISTS notifications (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'account',
+  is_read INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id,id DESC);
+CREATE TABLE IF NOT EXISTS disputes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  transaction_id INTEGER NOT NULL REFERENCES transactions(id),
+  reason TEXT NOT NULL,
+  details TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','investigating','resolved','rejected')),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(user_id,transaction_id)
+);
+CREATE TABLE IF NOT EXISTS saved_beneficiaries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  account_number TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  UNIQUE(user_id,account_number)
+);
+CREATE TABLE IF NOT EXISTS scheduled_transfers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  recipient_account TEXT NOT NULL,
+  recipient_name TEXT NOT NULL,
+  amount INTEGER NOT NULL CHECK(amount > 0),
+  note TEXT,
+  scheduled_at INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','completed','cancelled','failed')),
+  created_at INTEGER NOT NULL,
+  processed_at INTEGER,
+  failure_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_transfers(status,scheduled_at);
+CREATE TABLE IF NOT EXISTS account_limits (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id),
+  daily_transfer_limit INTEGER NOT NULL DEFAULT 500000,
+  daily_payment_limit INTEGER NOT NULL DEFAULT 100000,
+  updated_at INTEGER NOT NULL
+);
+`);
 module.exports = db;
