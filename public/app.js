@@ -353,7 +353,7 @@
   // ---------- render ----------
   function render(prefill) {
     var html;
-    if (!S.me && !['login','register','forgot','reset'].includes(S.view)) S.view = 'welcome';
+    if (!S.me && !['login','register','forgot','reset','mfa-login'].includes(S.view)) S.view = 'welcome';
     switch (S.view) {
       case 'login': html = vAuth('login'); break;
       case 'register': html = vAuth('register'); break;
