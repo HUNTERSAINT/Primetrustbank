@@ -23,6 +23,7 @@
   };
 
   var goalData = null; try { goalData = JSON.parse(localStorage.getItem('ptb_goal') || 'null'); } catch (_) {}
+  var resetToken = new URLSearchParams(window.location.search).get('reset') || '';
   var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], sessions: [], impersonation: { active: false } };
 
   // ---------- api ----------
@@ -92,6 +93,7 @@
       (reg ? '<label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" autocomplete="off" required placeholder="4 digits"><span class="hint">You will enter this to approve payments.</span></label>' + kyc : '') +
       '<p class="err" role="alert"></p>' +
       '<button class="pillbtn w" type="submit">' + (reg ? 'Create account & submit KYC' : 'Login') + '</button>' +
+      (reg ? '' : '<button type="button" class="muted" style="padding:8px" data-act="go" data-v="forgot">Forgot password?</button>') +
       '<button type="button" class="muted" style="padding:8px" data-act="go" data-v="' + (reg ? 'login' : 'register') + '">' + (reg ? 'I already have an account' : 'Create a new account') + '</button>' +
       '</form></section>';
   }
@@ -328,6 +330,13 @@
     var rows=S.sessions.map(function(s){return '<div class="tr"><div class="m"><b>'+(s.current?'This device · current session':'Signed-in device')+'</b><small>'+esc(s.device)+' · Last active '+esc(new Date(s.last_seen_at).toLocaleString())+' · '+(s.revoked?'Revoked':'Active')+'</small></div><div class="r">'+(!s.revoked?'<button class="copy" data-act="revoke-session" data-id="'+esc(s.id)+'">'+(s.current?'Sign out':'Revoke')+'</button>':'')+'</div></div>';}).join('')||'<p class="empty">No registered device sessions yet. Sign in again to register this device.</p>';
     return '<section class="screen">'+pageHead('Devices & sessions','Review active sign-ins')+'<div class="panel"><p class="lead">Revoke a device you no longer use. Signing out other devices keeps this session active.</p><button class="pillbtn d" data-act="revoke-others">Sign out other devices</button></div><div class="trh"><b>Recent sessions</b></div>'+rows+'</section>'+dock('profile');
   }
+
+  function vForgot(){
+    return '<section class="screen"><div class="hd"><button class="circ" data-act="go" data-v="login" aria-label="Back">'+ic('back')+'</button><h4>Password recovery</h4><span></span></div><form class="form" data-form="forgot"><h2>Reset your password</h2><p class="lead">Enter the email on your account. If it exists, we will send a one-time reset link.</p><label class="field">Email<input name="email" type="email" autocomplete="email" required></label><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Send reset link</button></form></section>';
+  }
+  function vReset(){
+    return '<section class="screen"><div class="brand">Prime Trust</div><form class="form" data-form="reset" style="margin-top:24px"><h2>Choose a new password</h2><p class="lead">Use at least 12 characters. The reset link is single-use and expires after 30 minutes.</p><label class="field">New password<input name="password" type="password" minlength="12" maxlength="72" autocomplete="new-password" required></label><label class="field">Confirm password<input name="confirm" type="password" minlength="12" maxlength="72" autocomplete="new-password" required></label><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Update password</button></form></section>';
+  }
   // ---------- render ----------
   function render(prefill) {
     var html;
@@ -335,6 +344,8 @@
     switch (S.view) {
       case 'login': html = vAuth('login'); break;
       case 'register': html = vAuth('register'); break;
+      case 'forgot': html = vForgot(); break;
+      case 'reset': html = vReset(); break;
       case 'verification': html = vVerification(); break;
       case 'home': html = vHome(); break;
       case 'accounts': html = vAccounts(); break;
@@ -437,7 +448,12 @@
     var d = {}; new FormData(form).forEach(function (v, k) { d[k] = typeof v === 'string' ? v.trim() : v; });
     setErr(form, ''); busy(form, true);
     var p;
-    if (kind === 'login') p = api('POST', '/api/auth/login', { email: d.email, password: d.password });
+    if (kind === 'forgot') p=api('POST','/api/auth/password-reset/request',{email:d.email});
+    else if (kind === 'reset') {
+      if(d.password!==d.confirm){busy(form,false);setErr(form,'Passwords do not match.');return;}
+      p=api('POST','/api/auth/password-reset/confirm',{token:resetToken,password:d.password});
+    }
+    else if (kind === 'login') p = api('POST', '/api/auth/login', { email: d.email, password: d.password });
     else if (kind === 'register') {
       var regFront=form.elements.id_front.files[0],regBack=form.elements.id_back.files[0],regSelfie=form.elements.selfie.files[0];
       p=Promise.all([compressIdFile(regFront),compressIdFile(regBack),compressIdFile(regSelfie)]).then(function(images){
@@ -475,6 +491,8 @@
     else if (kind === 'bills') p = api('POST', '/api/bills', { biller: d.biller, reference: d.reference, amount: d.amount, pin: d.pin }, S.idem);
     else return;
     p.then(function (res) {
+      if (kind === 'forgot') { S.view='login';render();toast('If your account exists, recovery instructions were sent.');return; }
+      if (kind === 'reset') { resetToken='';try{history.replaceState(null,'',location.pathname);}catch(_){} S.view='login';render();toast('Password updated. Sign in with your new password.');return; }
       if (kind === 'support') return api('GET','/api/support/messages').then(function(d){S.support=d;render();toast('Message sent to support');});
       if (kind === 'schedule') return load().then(function(){S.view='scheduled';render();toast('Transfer scheduled');});
       if (kind === 'dispute') return load().then(function(){S.view='disputes';render();toast('Dispute submitted');});
@@ -495,6 +513,6 @@
   api('GET', '/api/meta').then(function (m) { S.meta = m; }).catch(function () {})
     .then(function () { return load(); })
     .then(function () { S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; })
-    .catch(function () { S.me = null; S.view = 'welcome'; })
+    .catch(function () { S.me = null; S.view = resetToken ? 'reset' : 'welcome'; })
     .then(function () { render(); });
 })();
