@@ -656,7 +656,7 @@ app.post('/api/auth/password-reset/confirm',authLimiter,wrap((req,res)=>{
 }));
 app.post('/api/auth/mfa/verify',authLimiter,wrap((req,res)=>{
   const b=req.body||{},id=String(b.challenge_id||''),code=String(b.code||'');
-  if(!/^[0-9a-f-]{36}$/i.test(id)||!/^\\d{6}$/.test(code))throw httpErr(400,'Enter the 6-digit verification code.');
+  if(!/^[0-9a-f-]{36}$/i.test(id)||!/^\d{6}$/.test(code))throw httpErr(400,'Enter the 6-digit verification code.');
   const ch=db.prepare("SELECT * FROM mfa_challenges WHERE id=? AND purpose='login'").get(id);
   if(!ch||ch.used_at||ch.expires_at<=now()||ch.attempts>=5)throw httpErr(400,'Verification code expired. Sign in again.');
   const expected=crypto.createHash('sha256').update(id+':'+code+':'+JWT_SECRET).digest('hex'),a=Buffer.from(expected),z=Buffer.from(ch.code_hash);
@@ -675,7 +675,7 @@ app.post('/api/security/mfa/start',auth,requireVerified,sensitiveWriteLimiter,wr
 }));
 app.post('/api/security/mfa/confirm',auth,sensitiveWriteLimiter,wrap((req,res)=>{
   const b=req.body||{},id=String(b.challenge_id||''),code=String(b.code||'');
-  if(!/^[0-9a-f-]{36}$/i.test(id)||!/^\\d{6}$/.test(code))throw httpErr(400,'Enter the 6-digit verification code.');
+  if(!/^[0-9a-f-]{36}$/i.test(id)||!/^\d{6}$/.test(code))throw httpErr(400,'Enter the 6-digit verification code.');
   const ch=db.prepare("SELECT * FROM mfa_challenges WHERE id=? AND user_id=? AND purpose='enable'").get(id,req.user.id);
   if(!ch||ch.used_at||ch.expires_at<=now()||ch.attempts>=5)throw httpErr(400,'Verification code expired. Start setup again.');
   const expected=crypto.createHash('sha256').update(id+':'+code+':'+JWT_SECRET).digest('hex'),a=Buffer.from(expected),z=Buffer.from(ch.code_hash);
