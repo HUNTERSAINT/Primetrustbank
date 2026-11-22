@@ -34,7 +34,7 @@ app.use(helmet({
     }
   }
 }));
-app.use(express.json({ limit: '10kb' }));
+app.use(express.json({ limit: '8mb' }));
 app.use(cookieParser());
 
 // ---------- helpers ----------
@@ -195,6 +195,15 @@ app.get('/api/admin/requests', adminAuth, wrap((req, res) => {
     WHERE (? = 'all' OR vr.review_status = ?) ORDER BY vr.submitted_at DESC LIMIT 200`).all(status,status);
   res.json({ requests: rows });
 }));
+
+app.get('/api/admin/requests/:id', adminAuth, wrap((req,res)=>{
+  const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid identity request.');
+  const request=db.prepare("SELECT id,user_id,id_front_data,id_back_data,selfie_data FROM verification_requests WHERE id=?").get(id);
+  if(!request)throw httpErr(404,'Identity request not found.');
+  auditAdmin(req,'KYC_DOCUMENTS_VIEWED',request.user_id,null,'Identity document images opened for review');
+  res.json({documents:{front:request.id_front_data||null,back:request.id_back_data||null,selfie:request.selfie_data||null}});
+}));
+
 app.post('/api/admin/requests/:id/review', adminAuth, wrap((req, res) => {
   const id = Number(req.params.id);
   const decision = String((req.body || {}).decision || '');
@@ -267,6 +276,18 @@ app.post('/api/admin/users/:id/adjust-balance', adminAuth, wrap((req,res)=>{
   })();
   res.json({ok:true,balance:result.balance});
 }));
+
+app.patch('/api/admin/users/:id/card', adminAuth, wrap((req,res)=>{
+  const id=Number(req.params.id), frozen=(req.body||{}).frozen;
+  if(!Number.isSafeInteger(id)||id<1||typeof frozen!=='boolean')throw httpErr(400,'Choose a valid card control.');
+  const account=db.prepare("SELECT id FROM accounts WHERE user_id=? AND kind='user'").get(id);
+  if(!account)throw httpErr(404,'Customer account not found.');
+  const result=db.prepare('UPDATE cards SET frozen=? WHERE account_id=?').run(frozen?1:0,account.id);
+  if(!result.changes)throw httpErr(404,'Customer card not found.');
+  auditAdmin(req,frozen?'CARD_FROZEN':'CARD_UNFROZEN',id,null,'Admin card control');
+  res.json({ok:true,frozen});
+}));
+
 app.get('/api/admin/transactions', adminAuth, wrap((req,res)=>{
   const q=String(req.query.q||'').trim().slice(0,100), type=String(req.query.type||'all'), from=Number(req.query.from)||0, to=Number(req.query.to)||0;
   const limit=Math.min(Math.max(Number(req.query.limit)||100,1),250);
@@ -371,17 +392,23 @@ app.post('/api/verification/submit', auth, wrap((req, res) => {
   const dob = String(b.date_of_birth || '').trim();
   const address = String(b.address || '').trim();
   const idType = String(b.id_type || '').trim();
+  const front = String(b.id_front || '');
+  const back = String(b.id_back || '');
+  const selfie = String(b.selfie || '');
+  const validImage = value => !value || (/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(value) && value.length <= 1500000);
+  if (!front || !validImage(front) || !validImage(back) || !validImage(selfie)) throw httpErr(400, 'Upload a clear front image of your ID. Each image must be a supported photo under 1.5 MB after compression.');
   if (legalName.length < 2 || legalName.length > 100) throw httpErr(400, 'Enter your legal name.');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || Number.isNaN(Date.parse(dob))) throw httpErr(400, 'Enter a valid date of birth.');
   if (address.length < 8 || address.length > 250) throw httpErr(400, 'Enter your residential address.');
   if (!['Passport','Driver license','National identity card','Other government ID'].includes(idType)) throw httpErr(400, 'Choose a valid ID type.');
   const t = now();
   db.transaction(() => {
-    db.prepare(`INSERT INTO verification_requests (user_id, legal_name, date_of_birth, address, id_type, review_status, submitted_at)
-      VALUES (?,?,?,?,?,'submitted',?)
+    db.prepare(`INSERT INTO verification_requests (user_id, legal_name, date_of_birth, address, id_type, review_status, submitted_at, id_front_data, id_back_data, selfie_data)
+      VALUES (?,?,?,?,?,'submitted',?,?,?,?)
       ON CONFLICT(user_id) DO UPDATE SET legal_name=excluded.legal_name, date_of_birth=excluded.date_of_birth,
-      address=excluded.address, id_type=excluded.id_type, review_status='submitted', admin_note=NULL, submitted_at=excluded.submitted_at, reviewed_at=NULL`)
-      .run(req.user.id, legalName, dob, address, idType, t);
+      address=excluded.address, id_type=excluded.id_type, id_front_data=excluded.id_front_data, id_back_data=excluded.id_back_data,
+      selfie_data=excluded.selfie_data, review_status='submitted', admin_note=NULL, submitted_at=excluded.submitted_at, reviewed_at=NULL`)
+      .run(req.user.id, legalName, dob, address, idType, t, front, back || null, selfie || null);
     db.prepare("UPDATE users SET verification_status='submitted', verification_submitted_at=? WHERE id=?").run(t, req.user.id);
   })();
   res.json({ ok: true, verification_status: 'submitted' });
