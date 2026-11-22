@@ -77,7 +77,7 @@
       '<p class="lead">' + (reg ? 'It takes about a minute.' : 'Log in to see your balance.') + '</p>' +
       (reg ? '<label class="field">Full name<input name="full_name" autocomplete="name" required minlength="2" maxlength="80" placeholder="Ada Okafor"></label>' : '') +
       '<label class="field">Email<input name="email" type="email" autocomplete="email" required placeholder="you@example.com"></label>' +
-      '<label class="field">Password<input name="password" type="password" autocomplete="' + (reg ? 'new-password' : 'current-password') + '" required minlength="8" placeholder="At least 8 characters"></label>' +
+      '<label class="field">Password<input name="password" type="password" autocomplete="' + (reg ? 'new-password' : 'current-password') + '" required minlength="12" maxlength="72" placeholder="At least 12 characters"></label>' +
       (reg ? '<label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" autocomplete="off" required placeholder="4 digits"><span class="hint">You will enter this to approve every payment.</span></label>' : '') +
       '<p class="err" role="alert"></p>' +
       '<button class="pillbtn w" type="submit">' + (reg ? 'Create account' : 'Login') + '</button>' +
