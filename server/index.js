@@ -788,7 +788,7 @@ app.post('/api/external-transfers', auth, requireVerified, moneyLimiter, wrap(as
       const from=await getUserAccount(req.user.id),hold=await db.get("SELECT * FROM accounts WHERE account_number='SYS-EXTERNAL-TRANSFERS' AND kind='system'");
       if(!from||!hold)throw httpErr(500,'External transfer processing account is unavailable.');
       const movement=await move({from,to:hold,amount,typeOut:'external_transfer_pending',typeIn:'external_transfer_hold',counterOut:bank+' · '+name,counterIn:'External transfer funds held',note:'External transfer to '+bank+' · '+accountNumber+(note?' | '+note:'')});
-      const t=now(),insert=await db.run("INSERT INTO external_transfer_requests (user_id,from_account_id,bank_name,account_name,account_number,amount,status,note,created_at,updated_at,hold_group_id) VALUES (?,?,?,?,?,?,'pending',?,?,?,?,?)",[req.user.id,from.id,bank,name,accountNumber,amount,note||null,t,t,movement.group_id]);
+      const t=now(),insert=await db.run("INSERT INTO external_transfer_requests (user_id,from_account_id,bank_name,account_name,account_number,amount,status,note,created_at,updated_at,hold_group_id) VALUES (?,?,?,?,?,?,'pending',?,?,?,?)",[req.user.id,from.id,bank,name,accountNumber,amount,note||null,t,t,movement.group_id]);
       return {id:insert.lastInsertRowid,balance:movement.balance};
     });
     await notifyUser(req.user.id,'External transfer pending','Your request to '+bank+' is awaiting administrator processing. The amount is reserved; the transfer is not yet complete.','transfer');
