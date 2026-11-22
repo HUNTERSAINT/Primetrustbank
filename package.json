@@ -5,6 +5,7 @@
   "main": "server/index.js",
   "type": "commonjs",
   "scripts": {
+    "build": "npm test",
     "start": "node --check server/index.js && node --check public/app.js && node --check public/admin.js && node server/index.js",
     "dev": "node --watch server/index.js",
     "test": "node server/smoke-test.js"
