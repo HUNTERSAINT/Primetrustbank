@@ -33,7 +33,7 @@ function client() {
   // Identity review is required before any banking action.
   r = await a('POST', '/api/deposit', { amount: 20 });
   assert.equal(r.status, 403, 'pending user cannot use banking actions');
-  const verification = { legal_name: 'Ada Okafor', date_of_birth: '1995-05-12', address: '12 Example Street, Lagos, Nigeria', id_type: 'Passport' };
+  const verification = { legal_name: 'Ada Okafor', date_of_birth: '1995-05-12', address: '12 Example Street, Lagos, Nigeria', id_type: 'Passport', id_front: 'data:image/jpeg;base64,AA==', id_back: '', selfie: '' };
   r = await a('POST', '/api/verification/submit', verification);
   assert.equal(r.status, 200, 'submit identity for review');
   r = await b('POST', '/api/verification/submit', { ...verification, legal_name: 'Tolu Bello' });
@@ -42,6 +42,13 @@ function client() {
   assert.equal(r.status, 200, 'administrator login');
   const pending = (await admin('GET', '/api/admin/requests')).body.requests;
   assert.equal(pending.length, 2, 'admin sees pending requests');
+  const dbForKyc = require('./db');
+  const storedKyc = dbForKyc.prepare('SELECT vr.id_front_data FROM verification_requests vr JOIN users u ON u.id=vr.user_id WHERE u.email=?').get('ada@example.com');
+  assert.ok(storedKyc && storedKyc.id_front_data.startsWith('enc:v1:'), 'identity documents encrypted at rest');
+  const adaRequest = pending.find(x => x.email === 'ada@example.com');
+  const viewedDocs = await admin('GET', '/api/admin/requests/' + adaRequest.id);
+  assert.equal(viewedDocs.status, 200, 'admin can retrieve KYC documents');
+  assert.equal(viewedDocs.body.documents.front, verification.id_front, 'KYC document decrypts for authorized review');
   for (const request of pending) {
     r = await admin('POST', '/api/admin/requests/' + request.id + '/review', { decision: 'approved', note: 'Test review passed' });
     assert.equal(r.status, 200, 'administrator approves identity');
@@ -101,9 +108,19 @@ function client() {
   r = await c('POST', '/api/auth/login', { email: 'tolu@example.com', password: 'longpassword2' });
   assert.equal(r.status, 429, 'locked after 5 bad logins');
 
+  r = await a('POST', '/api/transfers', { to_account: meB.account.number, amount: 1, pin: '1234' }, { Origin: 'https://attacker.example' });
+  assert.equal(r.status, 403, 'cross-origin financial write blocked');
   r = await fetch(base + '/api/transfers', { method: 'POST', headers: { 'content-type': 'text/plain' }, body: '{}' });
   assert.equal(r.status, 415, 'non-JSON posts rejected');
 
+  r = await admin('POST', '/api/admin/logout', {});
+  assert.equal(r.status, 200, 'administrator logout');
+  r = await admin('GET', '/api/admin/overview');
+  assert.equal(r.status, 401, 'administrator session revoked on logout');
+  r = await a('POST', '/api/auth/logout', {});
+  assert.equal(r.status, 200, 'customer logout');
+  r = await a('GET', '/api/me');
+  assert.equal(r.status, 401, 'customer session revoked on logout');
   console.log('All checks passed.');
   server.close(); process.exit(0);
 })().catch((e) => { console.error('FAILED:', e.message); server.close(); process.exit(1); });
