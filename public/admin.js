@@ -22,6 +22,7 @@ async function renderPage(){
  if(S.page==='user-detail')return userDetail();
  if(S.page==='kyc')return kyc();
  if(S.page==='transactions')return transactions();
+ if(S.page==='disputes')return disputes();
  if(S.page==='chat')return chat();
  if(S.page==='email')return email();
  if(S.page==='audit')return audit();
@@ -71,6 +72,12 @@ async function transactions(){
  root.innerHTML=head('Transactions','Read-only banking ledger review. Export filtered transactions for reconciliation.')+
  '<div class="panel"><form class="toolbar" data-form="tx-filter"><div class="searchwrap"><input class="search" name="q" value="'+esc(S.txQuery)+'" placeholder="Search customer, account or reference"></div><select class="filter" name="type"><option value="all">All types</option>'+['transfer_in','transfer_out','deposit','airtime','bill','admin_credit','admin_debit'].map(x=>'<option value="'+x+'">'+x.replace(/_/g,' ')+'</option>').join('')+'</select><input class="filter" type="date" name="from" value="'+esc(S.txFrom)+'"><input class="filter" type="date" name="to" value="'+esc(S.txTo)+'"><button class="btn primary">Filter</button><button type="button" class="btn" data-act="csv">Export CSV</button></form><div class="muted small" style="margin-bottom:10px">'+d.total+' ledger entries shown up to 250 rows</div>'+table(['Reference','Customer','Account','Type','Amount','Balance','Counterparty','Note'],rows)+(rows?'':noRows('No transactions match these filters.'))+'</div>';
  const sel=$('select[name=type]');if(sel)sel.value=S.txType;
+}
+
+async function disputes(){
+ const d=await api('GET','/api/admin/disputes?status=all'),rows=d.disputes||[];
+ const body=rows.map(x=>'<tr><td>#'+x.id+'<small class="muted" style="display:block">Tx #'+x.transaction_id+' · '+date(x.transaction_created)+'</small></td><td>'+customer({full_name:x.full_name,email:x.email})+'<small class="muted" style="display:block">'+esc(x.account_number)+'</small></td><td>'+esc(x.reason.replace(/_/g,' '))+'<small class="muted" style="display:block">'+esc(x.details)+'</small></td><td>'+esc(x.transaction_type)+' · '+money(Math.abs(x.transaction_amount))+'</td><td>'+badge(x.status)+'</td><td><div class="row">'+(x.status==='open'?'<button class="btn" data-act="dispute-status" data-id="'+x.id+'" data-status="investigating">Investigate</button>':'')+(x.status==='investigating'?'<button class="btn good" data-act="dispute-status" data-id="'+x.id+'" data-status="resolved">Resolve</button><button class="btn danger" data-act="dispute-status" data-id="'+x.id+'" data-status="rejected">Reject</button>':'')+'</div></td></tr>').join('');
+ root.innerHTML=head('Transaction disputes','Review customer-reported transaction issues')+'<div class="panel tablewrap">'+table(['Dispute','Customer','Reason & details','Transaction','Status','Actions'],body)+(body?'':noRows('No transaction disputes have been submitted.'))+'</div>';
 }
 async function chat(){
  const d=await api('GET','/api/admin/chat/sessions'),sessions=d.sessions||[];
@@ -125,6 +132,7 @@ root.addEventListener('click',async e=>{
   if(a==='close-docs'){const modal=b.closest('.docmodal');if(modal)modal.remove();return;}
   if(a==='card'){const frozen=b.dataset.frozen==='true';if(!confirm((frozen?'Freeze':'Unfreeze')+' this customer card?'))return;await api('PATCH','/api/admin/users/'+b.dataset.id+'/card',{frozen});notify(frozen?'Customer card frozen.':'Customer card unfrozen.');await userDetail();return;}
   if(a==='kyc-review'){const decision=b.dataset.decision,id=b.dataset.id;if(!confirm((decision==='approved'?'Approve':'Reject')+' this identity verification?'))return;b.disabled=true;const note=$('[data-note="'+id+'"]').value;await api('POST','/api/admin/requests/'+id+'/review',{decision,note});notify('Identity review updated.');await kyc();return;}
+  if(a==='dispute-status'){const status=b.dataset.status;if(!confirm('Mark dispute #'+b.dataset.id+' as '+status+'?'))return;await api('PATCH','/api/admin/disputes/'+b.dataset.id,{status});notify('Dispute status updated.');await disputes();return;}
   if(a==='csv'){downloadCsv();return;}
   if(a==='chat-select'){S.chatId=Number(b.dataset.id);await chat();return;}
   if(a==='chat-close'){const status=b.dataset.status;await api('PATCH','/api/admin/chat/sessions/'+b.dataset.id+'/close',{status});notify(status==='closed'?'Conversation closed.':'Conversation reopened.');await chat();return;}
