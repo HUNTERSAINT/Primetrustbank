@@ -57,12 +57,11 @@
       '<div class="m"><b>' + esc(title) + '</b><small>' + esc(LABEL[t.type] || 'Payment') + ' · ' + esc(fdate(t.created_at)) + (t.note ? ' · ' + esc(t.note) : '') + '</small></div>' +
       '<div class="r"><b style="color:' + (neg ? 'var(--fg)' : 'var(--good)') + '">' + (neg ? '-' : '+') + money(Math.abs(t.amount)) + ' USD</b><small>Successful</small></div></div>';
   }
-  var status = '';
   var artCard = '<svg class="art" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice"><use href="#art"/></svg>';
 
   // ---------- views ----------
   function vWelcome() {
-    return '<section class="screen">' + status +
+    return '<section class="screen">'+
       '<div class="brand">Prime Trust</div><div class="stand"></div>' +
       '<div class="tilt"><div class="cardface">' + artCard + '<span class="tt">Prime Card</span><span class="chip"></span><span class="num">1234 5678 9101</span><span class="nm">Your name here</span><span class="nw">' + ic('tap') + '</span></div></div>' +
       '<div class="cta"><button class="pillbtn w" data-act="go" data-v="register">Create account</button>' +
