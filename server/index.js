@@ -932,12 +932,13 @@ app.delete('/api/card',auth,requireVerified,sensitiveWriteLimiter,wrap(async(req
  res.json({ok:true,revoked:true});
 }));
 app.get('/api/card/settings',auth,requireVerified,wrap(async (req,res)=>{
- const c=(await db.get('SELECT activated,online_enabled,international_enabled,daily_limit,card_pin_hash,frozen,physical_requested,physical_status FROM cards WHERE account_id=?', [req.account.id]));
+ const c=(await db.get('SELECT activated,online_enabled,international_enabled,daily_limit,card_pin_hash,frozen,physical_requested,physical_status,revoked FROM cards WHERE account_id=?', [req.account.id]));
  if(!c)throw httpErr(404,'No card has been issued to this account yet.');
+ if(c.revoked)throw httpErr(410,'This card has been closed.');
  res.json({settings:{activated:!!c.activated,online_enabled:!!c.online_enabled,international_enabled:!!c.international_enabled,daily_limit:c.daily_limit,card_pin_set:!!c.card_pin_hash,frozen:!!c.frozen,physical_requested:!!c.physical_requested,physical_status:c.physical_status}});
 }));
 app.patch('/api/card/settings',auth,requireVerified,sensitiveWriteLimiter,wrap(async (req,res)=>{
-  if(!(await db.get('SELECT 1 FROM cards WHERE account_id=?', [req.account.id])))throw httpErr(404,'No card has been issued to this account yet.');
+  const activeCard=await db.get('SELECT revoked FROM cards WHERE account_id=?',[req.account.id]);if(!activeCard)throw httpErr(404,'No card has been issued to this account yet.');if(activeCard.revoked)throw httpErr(410,'This card has been closed.');
 
   const b=req.body||{},limit=Number(b.daily_limit);
   if(typeof b.activated!=='boolean'||typeof b.online_enabled!=='boolean'||typeof b.international_enabled!=='boolean'||!Number.isSafeInteger(limit)||limit<10000||limit>10000000)throw httpErr(400,'Choose valid card settings and a daily limit between USD 100 and USD 100,000.');
@@ -948,7 +949,7 @@ app.patch('/api/card/settings',auth,requireVerified,sensitiveWriteLimiter,wrap(a
   res.json({ok:true});
 }));
 app.post('/api/card/pin',auth,requireVerified,sensitiveWriteLimiter,wrap(async (req,res)=>{
-  if(!(await db.get('SELECT 1 FROM cards WHERE account_id=?', [req.account.id])))throw httpErr(404,'No card has been issued to this account yet.');
+  const cardState=await db.get('SELECT revoked FROM cards WHERE account_id=?',[req.account.id]);if(!cardState)throw httpErr(404,'No card has been issued to this account yet.');if(cardState.revoked)throw httpErr(410,'This card has been closed.');
 
   const b=req.body||{},pin=String(b.card_pin||'');
   await verifyPin(req.user,String(b.transaction_pin||''));
@@ -957,7 +958,7 @@ app.post('/api/card/pin',auth,requireVerified,sensitiveWriteLimiter,wrap(async (
   res.json({ok:true});
 }));
 app.post('/api/card/replace',auth,requireVerified,sensitiveWriteLimiter,wrap(async (req,res)=>{
-  if(!(await db.get('SELECT 1 FROM cards WHERE account_id=?', [req.account.id])))throw httpErr(404,'No card has been issued to this account yet.');
+  const cardState=await db.get('SELECT revoked FROM cards WHERE account_id=?',[req.account.id]);if(!cardState)throw httpErr(404,'No card has been issued to this account yet.');if(cardState.revoked)throw httpErr(410,'This card has been closed. Contact support to request a new card.');
 
   await verifyPin(req.user,String((req.body||{}).transaction_pin||''));
   const number=demoCardNumber(),cvv=String(crypto.randomInt(100,1000)),exp=new Date();exp.setFullYear(exp.getFullYear()+4);
@@ -967,7 +968,7 @@ app.post('/api/card/replace',auth,requireVerified,sensitiveWriteLimiter,wrap(asy
   res.json({ok:true,last4,expiry});
 }));
 app.post('/api/card/freeze', auth, requireVerified, wrap(async (req, res) => {
-  if(!(await db.get('SELECT 1 FROM cards WHERE account_id=?', [req.account.id])))throw httpErr(404,'No card has been issued to this account yet.');
+  const cardState=await db.get('SELECT revoked FROM cards WHERE account_id=?',[req.account.id]);if(!cardState)throw httpErr(404,'No card has been issued to this account yet.');if(cardState.revoked)throw httpErr(410,'This card has been closed.');
 
   const frozen = (req.body || {}).frozen ? 1 : 0;
   (await db.run('UPDATE cards SET frozen = ? WHERE account_id = ?', [frozen, req.account.id]));
