@@ -813,7 +813,7 @@ app.post('/api/external-transfers', auth, requireVerified, moneyLimiter, wrap(as
     if(method==='international'){
       if(!/^[A-Z0-9]{8}([A-Z0-9]{3})?$/.test(swift)||!(/^[A-Z0-9]{4,34}$/.test(iban)||/^[A-Z0-9]{4,34}$/.test(acctIntl)))throw httpErr(400,'Enter a valid SWIFT/BIC and either an IBAN or international account number.');
       if(bankAddress.length<5||bankCountry.length<2||bankCity.length<2||street.length<3||city.length<2||country.length<2||currency.length!==3||!/^[A-Z]{3}$/.test(currency)||purpose.length<3||relationship.length<2||sourceOfFunds.length<2||!['OUR','SHA','BEN'].includes(chargeBearer))throw httpErr(400,'Complete beneficiary and bank addresses, bank city/country, destination country/currency, purpose, relationship, source of funds and fee preference.');
-      if(beneficiaryEmail&&!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(beneficiaryEmail))throw httpErr(400,'Enter a valid beneficiary email address or leave it blank.');
+      if(beneficiaryEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(beneficiaryEmail))throw httpErr(400,'Enter a valid beneficiary email address or leave it blank.');
       if(intermediarySwift&&!/^[A-Z0-9]{8}([A-Z0-9]{3})?$/.test(intermediarySwift))throw httpErr(400,'Enter a valid intermediary SWIFT/BIC or leave it blank.');
       if(intermediaryBank.length>0&&intermediarySwift.length===0)throw httpErr(400,'Enter the intermediary bank SWIFT/BIC when providing an intermediary bank.');
     }else{
