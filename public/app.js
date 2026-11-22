@@ -524,7 +524,6 @@
       api('POST', '/api/deposit', { amount: 500 }, uuid()).then(function () { return done('USD 500.00 test funds added'); }).catch(function (e) { toast(e.message); });
       return;
     }
-    if (a === 'delete-card') {var pin=prompt('Enter your 4-digit transaction PIN to close this card');if(pin===null)return;api('DELETE','/api/card',{transaction_pin:pin}).then(function(){return load();}).then(function(){render();toast('Card closed');}).catch(function(e){toast(e.message);});return;}
     if (a === 'delete-card') {var pin=prompt('Enter your 4-digit transaction PIN to delete this card from your dashboard');if(pin===null)return;if(!/^\\d{4}$/.test(pin)){toast('Enter a valid 4-digit transaction PIN');return;}if(!confirm('Permanently delete this card from your dashboard? This cannot be undone.'))return;api('DELETE','/api/card',{transaction_pin:pin}).then(function(){return load();}).then(function(){S.view='card';render();toast('Card deleted from dashboard');}).catch(function(e){toast(e.message);});return;}
     if (a === 'freeze') {
       var want = !S.me.card.frozen;
@@ -610,7 +609,7 @@
     p.then(function (res) {
       if (kind === 'login' && res.mfa_required) { mfaChallengeId=res.challenge_id;S.view='mfa-login';render();toast('Check your email for the sign-in code');return; }
       if (kind === 'card-reveal') { S.cardReveal=res.card; S.sheet='details'; render(); return; }
-      if (kind === 'card-close') return load().then(function(){S.view='card';render();toast('Card closed and disabled');});
+      if (kind === 'card-close') return load().then(function(){S.view='card';render();toast('Card deleted from dashboard');});
       if (kind === 'card-request') return load().then(function(){S.view='card';render();toast('Card request submitted for administrator review');});
       if (kind === 'card-settings') return load().then(function(){S.view='card';render();toast('Card controls updated');});
       if (kind === 'card-pin') return load().then(function(){S.view='card';render();toast('Card PIN saved');});
