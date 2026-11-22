@@ -43,13 +43,19 @@ CREATE TABLE IF NOT EXISTS cards (
   online_enabled        INTEGER NOT NULL DEFAULT 1,
   international_enabled INTEGER NOT NULL DEFAULT 0,
   daily_limit           BIGINT NOT NULL DEFAULT 250000,
-  card_pin_hash         TEXT
+  card_pin_hash         TEXT,
+  card_tier             TEXT NOT NULL DEFAULT 'normal' CHECK (card_tier IN ('normal','black','platinum')),
+  physical_requested    INTEGER NOT NULL DEFAULT 0,
+  physical_status       TEXT NOT NULL DEFAULT 'not_requested' CHECK (physical_status IN ('not_requested','ordered','shipped','delivered'))
 );
 
 CREATE TABLE IF NOT EXISTS card_requests (
   id           BIGSERIAL PRIMARY KEY,
   user_id      BIGINT NOT NULL UNIQUE REFERENCES users(id),
   status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','granted','rejected')),
+  card_tier    TEXT NOT NULL DEFAULT 'normal' CHECK (card_tier IN ('normal','black','platinum')),
+  physical_requested INTEGER NOT NULL DEFAULT 0,
+  physical_fee_cents BIGINT NOT NULL DEFAULT 0,
   requested_at BIGINT NOT NULL,
   reviewed_at  BIGINT,
   reviewed_by  TEXT
@@ -276,3 +282,19 @@ INSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS
 INSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-SANDBOX', 'system', 0)       ON CONFLICT (account_number) DO NOTHING;
 INSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-ADMIN-ADJUST', 'system', 0)  ON CONFLICT (account_number) DO NOTHING;
 INSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-EXTERNAL-TRANSFERS', 'system', 0) ON CONFLICT (account_number) DO NOTHING;
+
+-- Card product configuration and safe in-place migrations for existing deployments.
+CREATE TABLE IF NOT EXISTS card_product_settings (
+  id INTEGER PRIMARY KEY CHECK (id=1),
+  physical_card_fee_cents BIGINT NOT NULL DEFAULT 2500 CHECK (physical_card_fee_cents>=0 AND physical_card_fee_cents<=50000),
+  updated_at BIGINT NOT NULL DEFAULT 0,
+  updated_by TEXT
+);
+INSERT INTO card_product_settings (id,physical_card_fee_cents,updated_at) VALUES (1,2500,0) ON CONFLICT (id) DO NOTHING;
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS card_tier TEXT NOT NULL DEFAULT 'normal';
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS physical_requested INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS physical_status TEXT NOT NULL DEFAULT 'not_requested';
+ALTER TABLE card_requests ADD COLUMN IF NOT EXISTS card_tier TEXT NOT NULL DEFAULT 'normal';
+ALTER TABLE card_requests ADD COLUMN IF NOT EXISTS physical_requested INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE card_requests ADD COLUMN IF NOT EXISTS physical_fee_cents BIGINT NOT NULL DEFAULT 0;
+INSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-CARD-FEES', 'system', 0) ON CONFLICT (account_number) DO NOTHING;
