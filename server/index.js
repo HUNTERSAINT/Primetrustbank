@@ -36,6 +36,12 @@ if (!KYC_ENCRYPTION_KEY) {
   console.error('KYC_ENCRYPTION_KEY must be 64 hexadecimal characters');
   process.exit(1);
 }
+async function sendTransactionalEmail(to,subject,textBody,htmlBody){
+  const apiKey=process.env.RESEND_API_KEY,from=process.env.RESEND_FROM_EMAIL||process.env.EMAIL_FROM;
+  if(!apiKey||!from)throw httpErr(503,'Secure email delivery is not configured.');
+  const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({from,to:[to],subject,text:textBody,html:htmlBody})});
+  if(!response.ok)throw httpErr(502,'Could not send the security email. Try again later.');
+}
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 10);
 
 const app = express();
@@ -589,7 +595,7 @@ app.post('/api/auth/register', authLimiter, wrap((req, res) => {
   res.status(201).json({ ok: true, verification_status: 'submitted' });
 }));
 
-app.post('/api/auth/login', authLimiter, wrap((req, res) => {
+app.post('/api/auth/login', authLimiter, wrap(async (req, res) => {
   const em = String((req.body || {}).email || '').trim().toLowerCase();
   const password = (req.body || {}).password;
   const user = db.prepare('SELECT * FROM users WHERE email = ?').get(em);
@@ -604,6 +610,13 @@ app.post('/api/auth/login', authLimiter, wrap((req, res) => {
   }
   if (user.status === 'suspended') throw httpErr(403, 'This account is suspended. Please contact Prime Trust support.');
   db.prepare('UPDATE users SET failed_logins = 0, locked_until = 0 WHERE id = ?').run(user.id);
+  if(user.mfa_enabled){
+    const challengeId=crypto.randomUUID(),code=String(crypto.randomInt(0,1000000)).padStart(6,'0'),created=now();
+    const codeHash=crypto.createHash('sha256').update(challengeId+':'+code+':'+JWT_SECRET).digest('hex');
+    db.prepare("INSERT INTO mfa_challenges (id,user_id,purpose,code_hash,expires_at,created_at) VALUES (?,?,'login',?,?,?)").run(challengeId,user.id,codeHash,created+5*60*1000,created);
+    await sendTransactionalEmail(user.email,'Prime Trust sign-in code','Your sign-in verification code is '+code+'. It expires in 5 minutes.','<p>Your Prime Trust sign-in code is:</p><h2 style="letter-spacing:6px">'+code+'</h2><p>It expires in 5 minutes. If you did not try to sign in, change your password.</p>');
+    return res.json({mfa_required:true,challenge_id:challengeId});
+  }
   if (bcrypt.getRounds(user.password_hash) < 12) db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(bcrypt.hashSync(password,12),user.id);
   issueSession(res, user.id, req);
   res.json({ ok: true });
@@ -641,6 +654,43 @@ app.post('/api/auth/password-reset/confirm',authLimiter,wrap((req,res)=>{
   })();
   res.json({ok:true});
 }));
+app.post('/api/auth/mfa/verify',authLimiter,wrap((req,res)=>{
+  const b=req.body||{},id=String(b.challenge_id||''),code=String(b.code||'');
+  if(!/^[0-9a-f-]{36}$/i.test(id)||!/^\\d{6}$/.test(code))throw httpErr(400,'Enter the 6-digit verification code.');
+  const ch=db.prepare("SELECT * FROM mfa_challenges WHERE id=? AND purpose='login'").get(id);
+  if(!ch||ch.used_at||ch.expires_at<=now()||ch.attempts>=5)throw httpErr(400,'Verification code expired. Sign in again.');
+  const expected=crypto.createHash('sha256').update(id+':'+code+':'+JWT_SECRET).digest('hex'),a=Buffer.from(expected),z=Buffer.from(ch.code_hash);
+  if(a.length!==z.length||!crypto.timingSafeEqual(a,z)){db.prepare('UPDATE mfa_challenges SET attempts=attempts+1 WHERE id=?').run(id);throw httpErr(401,'Verification code is incorrect.');}
+  const user=db.prepare('SELECT status FROM users WHERE id=?').get(ch.user_id);
+  if(!user||user.status==='suspended')throw httpErr(403,'This account cannot sign in.');
+  db.prepare('UPDATE mfa_challenges SET used_at=? WHERE id=?').run(now(),id);
+  issueSession(res,ch.user_id,req);res.json({ok:true});
+}));
+app.post('/api/security/mfa/start',auth,requireVerified,sensitiveWriteLimiter,wrap(async (req,res)=>{
+  if(req.user.mfa_enabled)throw httpErr(409,'Multi-factor authentication is already enabled.');
+  const id=crypto.randomUUID(),code=String(crypto.randomInt(0,1000000)).padStart(6,'0'),created=now(),hash=crypto.createHash('sha256').update(id+':'+code+':'+JWT_SECRET).digest('hex');
+  db.prepare("INSERT INTO mfa_challenges (id,user_id,purpose,code_hash,expires_at,created_at) VALUES (?,?,'enable',?,?,?)").run(id,req.user.id,hash,created+5*60*1000,created);
+  await sendTransactionalEmail(req.user.email,'Enable Prime Trust sign-in verification','Your verification code is '+code+'. It expires in 5 minutes.','<p>Use this code to enable sign-in verification:</p><h2 style="letter-spacing:6px">'+code+'</h2><p>It expires in 5 minutes.</p>');
+  res.json({ok:true,challenge_id:id});
+}));
+app.post('/api/security/mfa/confirm',auth,sensitiveWriteLimiter,wrap((req,res)=>{
+  const b=req.body||{},id=String(b.challenge_id||''),code=String(b.code||'');
+  if(!/^[0-9a-f-]{36}$/i.test(id)||!/^\\d{6}$/.test(code))throw httpErr(400,'Enter the 6-digit verification code.');
+  const ch=db.prepare("SELECT * FROM mfa_challenges WHERE id=? AND user_id=? AND purpose='enable'").get(id,req.user.id);
+  if(!ch||ch.used_at||ch.expires_at<=now()||ch.attempts>=5)throw httpErr(400,'Verification code expired. Start setup again.');
+  const expected=crypto.createHash('sha256').update(id+':'+code+':'+JWT_SECRET).digest('hex'),a=Buffer.from(expected),z=Buffer.from(ch.code_hash);
+  if(a.length!==z.length||!crypto.timingSafeEqual(a,z)){db.prepare('UPDATE mfa_challenges SET attempts=attempts+1 WHERE id=?').run(id);throw httpErr(401,'Verification code is incorrect.');}
+  db.transaction(()=>{db.prepare('UPDATE mfa_challenges SET used_at=? WHERE id=?').run(now(),id);db.prepare('UPDATE users SET mfa_enabled=1 WHERE id=?').run(req.user.id);})();
+  res.json({ok:true,mfa_enabled:true});
+}));
+app.post('/api/security/mfa/disable',auth,sensitiveWriteLimiter,wrap((req,res)=>{
+  const b=req.body||{},password=String(b.password||''),pin=String(b.pin||'');
+  if(!bcrypt.compareSync(password,req.user.password_hash))throw httpErr(401,'Password is incorrect.');
+  verifyPin(req.user,pin);
+  db.prepare('UPDATE users SET mfa_enabled=0 WHERE id=?').run(req.user.id);
+  db.prepare("UPDATE mfa_challenges SET used_at=? WHERE user_id=? AND used_at IS NULL").run(now(),req.user.id);
+  res.json({ok:true,mfa_enabled:false});
+}));
 app.post('/api/auth/logout', (req, res) => {
   try { const payload=jwt.verify(req.cookies.ptb_session||'',JWT_SECRET); if(payload.jti)db.prepare('UPDATE user_sessions SET revoked_at=? WHERE jti=? AND revoked_at IS NULL').run(now(),payload.jti); } catch {}
   res.clearCookie('ptb_session', { path: '/' }); res.clearCookie('ptb_impersonation',{path:'/'}); res.json({ ok: true });
@@ -665,7 +715,7 @@ app.get('/api/me', auth, wrap((req, res) => {
   if(req.user.verification_status==='approved')processDueTransfers(req.user.id);
   const card = db.prepare('SELECT last4, expiry, frozen FROM cards WHERE account_id = ?').get(req.account.id);
   res.json({
-    name: req.user.full_name, email: req.user.email, verification_status: req.user.verification_status,
+    name: req.user.full_name, email: req.user.email, verification_status: req.user.verification_status, mfa_enabled: !!req.user.mfa_enabled,
     account: { number: req.account.account_number, currency: req.account.currency, balance: req.account.balance },
     card: { last4: card.last4, expiry: card.expiry, frozen: !!card.frozen },
     sandbox_funding: SANDBOX_FUNDING
