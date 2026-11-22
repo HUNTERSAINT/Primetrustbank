@@ -154,3 +154,14 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 .toast{position:fixed;left:50%;bottom:max(24px,env(safe-area-inset-bottom,0px));transform:translate(-50%,20px);background:var(--fg);color:var(--ink);padding:.7rem 1.1rem;border-radius:999px;font-weight:600;font-size:13px;opacity:0;pointer-events:none;transition:.25s;z-index:60;max-width:calc(100vw - 32px)}
 .toast.on{opacity:1;transform:translate(-50%,0)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+
+/* Customer/admin support chat */
+.chatlayout{display:flex;flex-direction:column;min-height:350px}
+.chathead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.chathead b{display:block;font-size:12px}.chathead small{display:block;color:var(--muted);font-size:10px;margin-top:4px}
+.messages{flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+.bubble{max-width:86%;align-self:flex-start;padding:11px 13px;border-radius:14px;background:rgba(183,160,255,.12);font-size:12px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere}
+.bubble.admin{align-self:flex-end;background:rgba(123,211,193,.13)}
+.bubble small{display:block;color:var(--muted);font-size:9px;margin-top:6px}
+.chatcompose{display:flex;gap:8px;padding:12px;border-top:1px solid var(--line);align-items:flex-end}
+.chatcompose textarea{flex:1;min-width:0;min-height:46px;max-height:120px;border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:12px;padding:11px;font:inherit;resize:vertical}
