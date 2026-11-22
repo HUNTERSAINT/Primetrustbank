@@ -120,7 +120,10 @@
       '<label class="field">Legal name<input name="legal_name" required minlength="2" maxlength="100" value="' + esc(me.name) + '" autocomplete="name"></label>' +
       '<label class="field">Date of birth<input name="date_of_birth" type="date" required></label>' +
       '<label class="field">Residential address<textarea name="address" required minlength="8" maxlength="250" rows="3" placeholder="Street, city, state, country"></textarea></label>' +
-      '<label class="field">Government ID type<select name="id_type" required><option value="">Select ID type</option><option>Passport</option><option>Driver license</option><option>National identity card</option><option>Other government ID</option></select></label>' +\n      '<label class="field">Front of government ID<input name="id_front" type="file" accept="image/jpeg,image/png,image/webp" required></label>' +\n      '<label class="field">Back of ID (if applicable)<input name="id_back" type="file" accept="image/jpeg,image/png,image/webp"></label>' +\n      '<label class="field">Selfie (optional)<input name="selfie" type="file" accept="image/jpeg,image/png,image/webp" capture="user"></label>' +
+      '<label class="field">Government ID type<select name="id_type" required><option value="">Select ID type</option><option>Passport</option><option>Driver license</option><option>National identity card</option><option>Other government ID</option></select></label>' +
+      '<label class="field">Front of government ID<input name="id_front" type="file" accept="image/jpeg,image/png,image/webp" required></label>' +
+      '<label class="field">Back of ID (if applicable)<input name="id_back" type="file" accept="image/jpeg,image/png,image/webp"></label>' +
+      '<label class="field">Selfie (optional)<input name="selfie" type="file" accept="image/jpeg,image/png,image/webp" capture="user"></label>' +
       '<p class="hint">Do not enter your SSN, ITIN, or full ID number here. An administrator will review your submission and may contact you securely for document checks.</p>' +
       '<p class="err" role="alert"></p><button class="pillbtn w" type="submit">Submit for review</button>' +
       '<button type="button" class="muted" style="padding:8px" data-act="logout">Log out</button></form>') +
