@@ -12,6 +12,12 @@ const PROD = process.env.NODE_ENV === 'production';
 const PORT = process.env.PORT || 3000;
 const SANDBOX_FUNDING = process.env.ALLOW_SANDBOX_FUNDING !== 'false';
 const SESSION_HOURS = 8;
+const ADMIN_SESSION_HOURS = 4;
+if (PROD && Buffer.byteLength(JWT_SECRET || '') < 32) { console.error('JWT_SECRET must contain at least 32 bytes in production'); process.exit(1); }
+const KYC_ENCRYPTION_KEY = process.env.KYC_ENCRYPTION_KEY
+  ? ( /^[a-f0-9]{64}$/i.test(process.env.KYC_ENCRYPTION_KEY) ? Buffer.from(process.env.KYC_ENCRYPTION_KEY, 'hex') : null )
+  : crypto.createHash('sha256').update('prime-trust-kyc-v1:' + JWT_SECRET).digest();
+if (!KYC_ENCRYPTION_KEY) { console.error('KYC_ENCRYPTION_KEY must be 64 hexadecimal characters'); process.exit(1); }
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 10);
 
 let JWT_SECRET = process.env.JWT_SECRET;
@@ -21,7 +27,7 @@ if (!JWT_SECRET) {
 }
 
 const app = express();
-app.set('trust proxy', 1);
+app.set('trust proxy', 1); // Railway's single trusted edge proxy
 app.use(helmet({
   contentSecurityPolicy: {
     useDefaults: true,
@@ -34,7 +40,7 @@ app.use(helmet({
     }
   }
 }));
-app.use(express.json({ limit: '8mb' }));
+app.use(express.json({ limit: '5mb', strict: true }));
 app.use(cookieParser());
 
 // ---------- helpers ----------
@@ -65,7 +71,9 @@ function newAccountNumber() {
 function cardNumber() { return String(crypto.randomInt(1000, 9999)); }
 
 function issueSession(res, userId) {
-  const token = jwt.sign({ uid: userId }, JWT_SECRET, { expiresIn: SESSION_HOURS + 'h' });
+  const row = db.prepare('SELECT session_version FROM users WHERE id = ?').get(userId);
+  if (!row) throw httpErr(404, 'Customer account not found.');
+  const token = jwt.sign({ uid: userId, sv: row.session_version || 0 }, JWT_SECRET, { expiresIn: SESSION_HOURS + 'h' });
   res.cookie('ptb_session', token, {
     httpOnly: true, sameSite: 'strict', secure: PROD, maxAge: SESSION_HOURS * 3600 * 1000, path: '/'
   });
@@ -74,10 +82,28 @@ function issueSession(res, userId) {
 function adminAuth(req, res, next) {
   try {
     const payload = jwt.verify(req.cookies.ptb_admin || '', JWT_SECRET);
-    if (payload.admin !== true) throw new Error('not admin');
+    if (payload.admin !== true || !payload.jti) throw new Error('not admin');
+    const session = db.prepare('SELECT admin_email, expires_at, revoked_at FROM admin_sessions WHERE jti = ?').get(payload.jti);
+    if (!session || session.revoked_at || session.expires_at <= now() || session.admin_email !== payload.email) throw new Error('admin session revoked');
     req.admin = payload;
     next();
   } catch { fail(res, 401, 'Administrator sign-in required.'); }
+}
+function sealKyc(value) {
+  if (!value) return null;
+  const iv = crypto.randomBytes(12), cipher = crypto.createCipheriv('aes-256-gcm', KYC_ENCRYPTION_KEY, iv);
+  const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  return 'enc:v1:' + Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64');
+}
+function unsealKyc(value) {
+  if (!value) return null;
+  if (!value.startsWith('enc:v1:')) return value; // legacy records are encrypted when an admin first reviews them
+  const packed = Buffer.from(value.slice(7), 'base64');
+  if (packed.length < 29) throw httpErr(500, 'Stored identity document is corrupted.');
+  const iv = packed.subarray(0, 12), tag = packed.subarray(12, 28), data = packed.subarray(28);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', KYC_ENCRYPTION_KEY, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
 }
 function auditAdmin(req, action, targetUserId, amount, details) {
   db.prepare('INSERT INTO admin_audit (admin_email, action, target_user_id, amount, details, created_at) VALUES (?,?,?,?,?,?)')
@@ -92,9 +118,9 @@ function requireVerified(req, res, next) {
 
 function auth(req, res, next) {
   try {
-    const { uid } = jwt.verify(req.cookies.ptb_session || '', JWT_SECRET);
+    const { uid, sv } = jwt.verify(req.cookies.ptb_session || '', JWT_SECRET);
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
-    if (!user) throw new Error('no user');
+    if (!user || Number(sv || 0) !== Number(user.session_version || 0)) throw new Error('session revoked');
     if (user.status === 'suspended') return fail(res, 403, 'This account is suspended. Please contact Prime Trust support.');
     req.user = user;
     req.account = db.prepare("SELECT * FROM accounts WHERE user_id = ? AND kind = 'user'").get(uid);
@@ -110,9 +136,14 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false,
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 15, standardHeaders: true, legacyHeaders: false,
   message: { error: 'Too many attempts. Try again in a few minutes.' } });
-const moneyLimiter = rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false,
+const adminLoginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false, skipSuccessfulRequests: true,
+  message: { error: 'Too many administrator sign-in attempts. Try again later.' } });
+const adminApiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Administrator request limit reached. Slow down.' } });
+app.use('/api/admin', adminApiLimiter);
+const moneyLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false,
   message: { error: 'Slow down. Too many requests.' } });
 
 // ---------- ledger core ----------
@@ -170,23 +201,32 @@ const shapeTx = (t) => ({ id: t.id, type: t.type, amount: t.amount, balance_afte
   counterparty: t.counterparty, note: cleanNote(t.note), created_at: t.created_at });
 
 // ---------- auth routes ----------
-app.post('/api/admin/login', authLimiter, wrap((req, res) => {
+app.post('/api/admin/login', adminLoginLimiter, wrap((req, res) => {
   const email = String((req.body || {}).email || '').trim().toLowerCase();
   const password = String((req.body || {}).password || '');
   const adminEmail = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
   const adminPassword = String(process.env.ADMIN_PASSWORD || '');
-  if (!adminEmail || !adminPassword) throw httpErr(503, 'Admin access is not configured. Set ADMIN_EMAIL and ADMIN_PASSWORD.');
+  const adminPasswordHash = String(process.env.ADMIN_PASSWORD_HASH || '');
+  if (!adminEmail || (!adminPassword && !adminPasswordHash)) throw httpErr(503, 'Admin access is not configured. Set ADMIN_EMAIL and ADMIN_PASSWORD_HASH.');
+  if (!adminPasswordHash && adminPassword.length < 14) throw httpErr(503, 'Administrator password must be at least 14 characters; configure ADMIN_PASSWORD_HASH for a bcrypt hash.');
   const a = Buffer.from(email), b = Buffer.from(adminEmail);
   const p = Buffer.from(password), q = Buffer.from(adminPassword);
   const emailOk = a.length === b.length && crypto.timingSafeEqual(a, b);
-  const passOk = p.length === q.length && crypto.timingSafeEqual(p, q);
+  let passOk = false;
+  if (adminPasswordHash && /^\$2[aby]\$\d\d\$/.test(adminPasswordHash)) {
+    try { passOk = bcrypt.compareSync(password, adminPasswordHash); } catch { passOk = false; }
+  } else {
+    passOk = p.length === q.length && q.length > 0 && crypto.timingSafeEqual(p, q);
+  }
   if (!emailOk || !passOk) throw httpErr(401, 'Email or password is incorrect.');
-  const token = jwt.sign({ admin: true, email: adminEmail }, JWT_SECRET, { expiresIn: '4h' });
-  res.cookie('ptb_admin', token, { httpOnly: true, sameSite: 'strict', secure: PROD, maxAge: 4 * 3600 * 1000, path: '/api' });
+  const jti = crypto.randomUUID(), created = now(), expires = created + ADMIN_SESSION_HOURS * 3600 * 1000;
+  db.prepare('INSERT INTO admin_sessions (jti,admin_email,created_at,expires_at) VALUES (?,?,?,?)').run(jti,adminEmail,created,expires);
+  const token = jwt.sign({ admin: true, email: adminEmail, jti }, JWT_SECRET, { expiresIn: ADMIN_SESSION_HOURS + 'h' });
+  res.cookie('ptb_admin', token, { httpOnly: true, sameSite: 'strict', secure: PROD, maxAge: ADMIN_SESSION_HOURS * 3600 * 1000, path: '/api' });
   db.prepare('INSERT INTO admin_audit (admin_email, action, details, created_at) VALUES (?,?,?,?)').run(adminEmail, 'ADMIN_LOGIN', 'Administrator signed in', now());
   res.json({ ok: true });
 }));
-app.post('/api/admin/logout', adminAuth, (req, res) => { res.clearCookie('ptb_admin', { path: '/api' }); res.json({ ok: true }); });
+app.post('/api/admin/logout', adminAuth, (req, res) => { db.prepare('UPDATE admin_sessions SET revoked_at=? WHERE jti=? AND revoked_at IS NULL').run(now(),req.admin.jti); auditAdmin(req,'ADMIN_LOGOUT',null,null,'Administrator signed out'); res.clearCookie('ptb_admin', { path: '/api' }); res.json({ ok: true }); });
 
 app.post('/api/admin/impersonate/:id', adminAuth, wrap((req,res)=>{
   const id=Number(req.params.id);
@@ -222,8 +262,16 @@ app.get('/api/admin/requests/:id', adminAuth, wrap((req,res)=>{
   const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid identity request.');
   const request=db.prepare("SELECT id,user_id,id_front_data,id_back_data,selfie_data FROM verification_requests WHERE id=?").get(id);
   if(!request)throw httpErr(404,'Identity request not found.');
+  const docs={front:request.id_front_data||null,back:request.id_back_data||null,selfie:request.selfie_data||null};
+  const encrypted={};
+  for(const [key,column] of [['front','id_front_data'],['back','id_back_data'],['selfie','selfie_data']]){
+    const value=docs[key];
+    if(value&&!value.startsWith('enc:v1:')){encrypted[column]=sealKyc(value);docs[key]=value;}
+    else docs[key]=unsealKyc(value);
+  }
+  if(Object.keys(encrypted).length){const sets=Object.keys(encrypted).map(k=>k+'=?').join(',');db.prepare('UPDATE verification_requests SET '+sets+' WHERE id=?').run(...Object.values(encrypted),id);}
   auditAdmin(req,'KYC_DOCUMENTS_VIEWED',request.user_id,null,'Identity document images opened for review');
-  res.json({documents:{front:request.id_front_data||null,back:request.id_back_data||null,selfie:request.selfie_data||null}});
+  res.json({documents:docs});
 }));
 
 app.post('/api/admin/requests/:id/review', adminAuth, wrap((req, res) => {
@@ -373,11 +421,16 @@ app.post('/api/admin/email/send', adminAuth, wrap((req,res)=>{
   if(!users.length) throw httpErr(400,'No eligible customer email addresses.');
   if(users.length>500) throw httpErr(400,'Audience exceeds 500 recipients; select a smaller batch.');
   const escapeHtml=s=>String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-  const safeMessage=escapeHtml(message).replace(/\r?\n/g,'<br>');
+  const safeMessage=escapeHtml(message).replace(/\r?
+/g,'<br>');
   const results=[]; let sent=0,failed=0;
   for(const user of users){
     try{
-      const response=fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({from,to:[user.email],subject,text:'Hello '+user.full_name+',\n\n'+message+'\n\nPrime Trust Bank',html:'<!doctype html><html><body style="font-family:Arial,sans-serif;color:#20162f"><h2>Prime Trust Bank</h2><p>Hello '+escapeHtml(user.full_name)+',</p><div style="line-height:1.7">'+safeMessage+'</div><p>Regards,<br>Prime Trust Bank Support</p></body></html>'})});
+      const response=fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({from,to:[user.email],subject,text:'Hello '+user.full_name+',
+
+'+message+'
+
+Prime Trust Bank',html:'<!doctype html><html><body style="font-family:Arial,sans-serif;color:#20162f"><h2>Prime Trust Bank</h2><p>Hello '+escapeHtml(user.full_name)+',</p><div style="line-height:1.7">'+safeMessage+'</div><p>Regards,<br>Prime Trust Bank Support</p></body></html>'})});
       // synchronous endpoint keeps audit and response consistent; fetch is awaited below via async wrapper
       results.push({user,response});
     }catch(_){failed++;results.push({user,error:'Network error'});}
@@ -430,7 +483,7 @@ app.post('/api/verification/submit', auth, wrap((req, res) => {
       ON CONFLICT(user_id) DO UPDATE SET legal_name=excluded.legal_name, date_of_birth=excluded.date_of_birth,
       address=excluded.address, id_type=excluded.id_type, id_front_data=excluded.id_front_data, id_back_data=excluded.id_back_data,
       selfie_data=excluded.selfie_data, review_status='submitted', admin_note=NULL, submitted_at=excluded.submitted_at, reviewed_at=NULL`)
-      .run(req.user.id, legalName, dob, address, idType, t, front, back || null, selfie || null);
+      .run(req.user.id, legalName, dob, address, idType, t, sealKyc(front), sealKyc(back), sealKyc(selfie));
     db.prepare("UPDATE users SET verification_status='submitted', verification_submitted_at=? WHERE id=?").run(t, req.user.id);
   })();
   res.json({ ok: true, verification_status: 'submitted' });
@@ -442,11 +495,11 @@ app.post('/api/auth/register', authLimiter, wrap((req, res) => {
   const name = String(full_name || '').trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em) || em.length > 120) throw httpErr(400, 'Enter a valid email address.');
   if (name.length < 2 || name.length > 80) throw httpErr(400, 'Enter your full name.');
-  if (typeof password !== 'string' || password.length < 8 || password.length > 100) throw httpErr(400, 'Password must be at least 8 characters.');
+  if (typeof password !== 'string' || password.length < 12 || Buffer.byteLength(password, 'utf8') > 72) throw httpErr(400, 'Password must be at least 12 characters and no more than 72 UTF-8 bytes.');
   if (typeof pin !== 'string' || !/^\d{4}$/.test(pin)) throw httpErr(400, 'Transaction PIN must be 4 digits.');
   if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(em)) throw httpErr(409, 'An account with this email already exists.');
 
-  const ph = bcrypt.hashSync(password, 10), pinh = bcrypt.hashSync(pin, 10);
+  const ph = bcrypt.hashSync(password, 12), pinh = bcrypt.hashSync(pin, 12);
   const userId = db.transaction(() => {
     const u = db.prepare('INSERT INTO users (email, full_name, password_hash, pin_hash, created_at) VALUES (?,?,?,?,?)')
       .run(em, name, ph, pinh, now()).lastInsertRowid;
@@ -476,11 +529,15 @@ app.post('/api/auth/login', authLimiter, wrap((req, res) => {
   }
   if (user.status === 'suspended') throw httpErr(403, 'This account is suspended. Please contact Prime Trust support.');
   db.prepare('UPDATE users SET failed_logins = 0, locked_until = 0 WHERE id = ?').run(user.id);
+  if (bcrypt.getRounds(user.password_hash) < 12) db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(bcrypt.hashSync(password,12),user.id);
   issueSession(res, user.id);
   res.json({ ok: true });
 }));
 
-app.post('/api/auth/logout', (req, res) => { res.clearCookie('ptb_session', { path: '/' }); res.json({ ok: true }); });
+app.post('/api/auth/logout', (req, res) => {
+  try { const payload=jwt.verify(req.cookies.ptb_session||'',JWT_SECRET); if(payload.uid) db.prepare('UPDATE users SET session_version=session_version+1 WHERE id=?').run(payload.uid); } catch {}
+  res.clearCookie('ptb_session', { path: '/' }); res.clearCookie('ptb_impersonation',{path:'/'}); res.json({ ok: true });
+});
 
 // ---------- banking routes ----------
 
@@ -545,7 +602,8 @@ app.post('/api/transfers', auth, requireVerified, moneyLimiter, wrap((req, res) 
       WHERE a.account_number = ? AND a.kind = 'user'`).get(String(to_account));
     if (!dest) throw httpErr(404, 'No account with that number.');
     if (dest.id === req.account.id) throw httpErr(400, 'You cannot send money to yourself.');
-    const userNote = String(note || '').replace(/[|\r\n]/g, ' ').slice(0, 60);
+    const userNote = String(note || '').replace(/[|\r
+]/g, ' ').slice(0, 60);
     const out = db.transaction(() => move({
       from: req.account, to: dest, amount: amt,
       typeOut: 'transfer_out', typeIn: 'transfer_in',
