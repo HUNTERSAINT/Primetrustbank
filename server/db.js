@@ -95,6 +95,7 @@ const ensureSystem = db.prepare(
 );
 ensureSystem.run('SYS-BILLERS');
 ensureSystem.run('SYS-SANDBOX');
+ensureSystem.run('SYS-ADMIN-ADJUST');
 
 
 const adminColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
