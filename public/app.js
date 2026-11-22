@@ -167,26 +167,22 @@
       '<div class="hd"><button class="circ" data-act="go" data-v="home" aria-label="Back">' + ic('back') + '</button><h4>Activity</h4><button class="copy" data-act="statement">Export</button></div><label class="field" style="margin:8px 0 14px">Search transactions<input data-search type="search" placeholder="Search activity"></label>' + trs + '</section>' + dock('history');
   }
   function vCard() {
-    var me = S.me, c = me.card;
-    var outs = S.txs.filter(function (t) { return t.amount < 0; }).slice(0, 3).map(txRow).join('') || '<p class="empty">No card activity yet.</p>';
-    return '<section class="screen">' + 
-      '<div class="hd"><button class="circ" data-act="go" data-v="home" aria-label="Back">' + ic('back') + '</button><h4>Manage card</h4><span></span></div>' +
-      '<div class="panel cardbal"><div><small>US Dollar</small><b>' + money(me.account.balance) + '</b></div>' +
-      '<button class="addf" data-act="addfunds">' + ic('plus', 'font-size:12px') + 'Add money</button></div>' +
-      '<div class="cardwrap"><div class="cardface bigcard' + (c.frozen ? ' frozen' : '') + '">' + artCard +
-      '<span class="tt">Prime Trust</span><span class="badge">PRIME</span>' +
-      '<span class="num">4556 •••• •••• ' + esc(c.last4) + '</span><span class="nm">' + esc(me.name) + '</span><span class="exp">' + esc(c.expiry) + '</span></div>' +
-      (c.frozen ? '<div class="frozenlbl">FROZEN</div>' : '') + '</div>' +
-      '<div class="acts s3acts">' +
-      '<button class="act" data-act="sheet" data-s="details"><i>' + ic('detail') + '</i>Details</button>' +
-      '<button class="act" data-act="addfunds"><i>' + ic('plus') + '</i>Add Money</button>' +
-      '<button class="act" data-act="freeze" aria-pressed="' + c.frozen + '"><i>' + ic('snow') + '</i>' + (c.frozen ? 'Unfreeze' : 'Freeze') + '</button>' +
-      '<button class="act" data-act="sheet" data-s="profile"><i>' + ic('dots') + '</i>More</button></div>' +
-
-      '<div class="trh"><b>Recent Transactions</b><button data-act="go" data-v="history">View all</button></div>' + outs +
-      '</section>' + dock('card');
+    var me=S.me,c=me.card;
+    var outs=S.txs.filter(function(t){return t.amount<0;}).slice(0,3).map(txRow).join('')||'<p class="empty">No card activity yet.</p>';
+    return '<section class="screen"><div class="hd"><button class="circ" data-act="go" data-v="home" aria-label="Back">'+ic('back')+'</button><h4>Manage card</h4><span></span></div>'+
+      '<div class="panel cardbal"><div><small>US Dollar</small><b>'+money(me.account.balance)+'</b></div><button class="addf" data-act="addfunds">'+ic('plus','font-size:12px')+'Add money</button></div>'+
+      '<div class="cardwrap"><div class="cardface bigcard'+(c.frozen?' frozen':'')+'">'+artCard+'<span class="tt">Prime Trust</span><span class="badge">PRIME</span><span class="num">4556 •••• •••• '+esc(c.last4)+'</span><span class="nm">'+esc(me.name)+'</span><span class="exp">'+esc(c.expiry)+'</span></div>'+(c.frozen?'<div class="frozenlbl">FROZEN</div>':'')+'</div>'+
+      '<div class="acts s3acts"><button class="act" data-act="sheet" data-s="details"><i>'+ic('detail')+'</i>Details</button><button class="act" data-act="freeze" aria-pressed="'+c.frozen+'"><i>'+ic('snow')+'</i>'+(c.frozen?'Unfreeze':'Freeze')+'</button><button class="act" data-act="sheet" data-s="card-replace"><i>'+ic('detail')+'</i>Replace</button></div>'+
+      '<div class="sub">Card controls</div><div class="panel"><form class="form" data-form="card-settings">'+
+      '<label class="field"><span><input style="width:auto" type="checkbox" name="activated" '+(c.activated?'checked':'')+'> Card activated</span></label>'+
+      '<label class="field"><span><input style="width:auto" type="checkbox" name="online_enabled" '+(c.online_enabled?'checked':'')+'> Online purchases</span></label>'+
+      '<label class="field"><span><input style="width:auto" type="checkbox" name="international_enabled" '+(c.international_enabled?'checked':'')+'> International purchases</span></label>'+
+      '<label class="field">Daily card limit (USD)<input name="daily_limit" type="number" min="100" max="100000" step=".01" value="'+(c.daily_limit/100)+'" required></label>'+
+      '<label class="field">Transaction PIN<input name="transaction_pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label>'+
+      '<p class="hint">Demo card controls only. These preferences are not connected to a real card network or authorization processor.</p><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Save card controls</button></form></div>'+
+      '<div class="sub">Card PIN</div><div class="panel"><form class="form" data-form="card-pin"><label class="field">New card PIN<input name="card_pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label><label class="field">Confirm with transaction PIN<input name="transaction_pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label><p class="err" role="alert"></p><button class="pillbtn d" type="submit">'+(c.card_pin_set?'Change card PIN':'Set card PIN')+'</button></form></div>'+
+      '<div class="trh"><b>Recent Transactions</b><button data-act="go" data-v="history">View all</button></div>'+outs+'</section>'+dock('card');
   }
-
   function pageHead(title, subtitle) {
     return '<div class="hd"><button class="circ" data-act="go" data-v="home" aria-label="Back to dashboard">' + ic('back') + '</button><div class="pagehead"><h4>' + esc(title) + '</h4><small>' + esc(subtitle || '') + '</small></div><span></span></div>';
   }
@@ -284,6 +280,9 @@
     return sheetWrap('Savings goal','<form class="form" data-form="goal" style="margin-top:0"><label class="field">Goal name<input name="name" required maxlength="50" value="'+esc(g.name)+'" placeholder="Emergency fund"></label><label class="field">Target amount (USD)<input name="target" type="number" min="1" step="0.01" required value="'+esc(g.target)+'"></label><label class="field">Saved amount (USD)<input name="saved" type="number" min="0" step="0.01" required value="'+esc(g.saved)+'"></label><p class="hint">Tracker only; this does not move money or create a savings account.</p><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Save goal</button>'+(S.goal?'<button type="button" class="pillbtn d" data-act="clear-goal">Remove goal</button>':'')+'</form>');
   }
 
+    function sCardReplace(){
+    return sheetWrap('Replace demo card','<p class="lead">Replacing will create a new demo card number ending and require activation and a new card PIN.</p><form class="form" data-form="card-replace"><label class="field">Transaction PIN<input name="transaction_pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label><p class="err" role="alert"></p><button class="pillbtn d" type="submit">Replace card</button></form>');
+  }
   function sMfaDisable(){
     return sheetWrap('Disable sign-in verification','<form class="form" data-form="mfa-disable"><p class="lead">Confirm your password and transaction PIN to turn off this protection.</p><label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label><label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label><p class="err" role="alert"></p><button class="pillbtn d" type="submit">Disable MFA</button></form>');
   }
@@ -381,7 +380,7 @@
       default: html = vWelcome();
     }
     if (S.sheet && S.me) {
-      html += ({ send: function () { return sSend(prefill); }, airtime: sAirtime, bills: sBills, fund: sFund, details: sDetails, profile: sProfile, goal: sGoal, 'mfa-disable': sMfaDisable }[S.sheet] || function () { return ''; })();
+      html += ({ send: function () { return sSend(prefill); }, airtime: sAirtime, bills: sBills, fund: sFund, details: sDetails, profile: sProfile, goal: sGoal, 'mfa-disable': sMfaDisable, 'card-replace': sCardReplace }[S.sheet] || function () { return ''; })();
     }
     if (S.me && S.impersonation && S.impersonation.active) html = '<div class="impersonation-banner"><div><b>Admin session · Viewing as customer</b><small>Administrator: '+esc(S.impersonation.admin_email||'')+'</small></div><button type="button" data-act="return-admin">Return to Admin</button></div>'+html;
     app.innerHTML = html;
@@ -466,6 +465,9 @@
     var d = {}; new FormData(form).forEach(function (v, k) { d[k] = typeof v === 'string' ? v.trim() : v; });
     setErr(form, ''); busy(form, true);
     var p;
+    if (kind === 'card-settings') p=api('PATCH','/api/card/settings',{activated:d.activated==='on',online_enabled:d.online_enabled==='on',international_enabled:d.international_enabled==='on',daily_limit:Math.round(Number(d.daily_limit)*100),transaction_pin:d.transaction_pin});
+    else if (kind === 'card-pin') p=api('POST','/api/card/pin',{card_pin:d.card_pin,transaction_pin:d.transaction_pin});
+    else if (kind === 'card-replace') p=api('POST','/api/card/replace',{transaction_pin:d.transaction_pin});
     if (kind === 'mfa-login') p=api('POST','/api/auth/mfa/verify',{challenge_id:mfaChallengeId,code:d.code});
     else if (kind === 'mfa-setup') p=api('POST','/api/security/mfa/confirm',{challenge_id:mfaChallengeId,code:d.code});
     else if (kind === 'mfa-disable') p=api('POST','/api/security/mfa/disable',{password:d.password,pin:d.pin});
@@ -513,6 +515,9 @@
     else return;
     p.then(function (res) {
       if (kind === 'login' && res.mfa_required) { mfaChallengeId=res.challenge_id;S.view='mfa-login';render();toast('Check your email for the sign-in code');return; }
+      if (kind === 'card-settings') return load().then(function(){S.view='card';render();toast('Card controls updated');});
+      if (kind === 'card-pin') return load().then(function(){S.view='card';render();toast('Card PIN saved');});
+      if (kind === 'card-replace') return load().then(function(){S.sheet=null;S.view='card';render();toast('Demo card replaced. Activate it and set a new PIN.');});
       if (kind === 'mfa-login') { mfaChallengeId='';return load().then(function(){S.view=S.me.verification_status==='approved'?'home':'verification';render();toast('Signed in securely');}); }
       if (kind === 'mfa-setup') { mfaChallengeId='';return load().then(function(){S.view='security';render();toast('Multi-factor authentication enabled');}); }
       if (kind === 'mfa-disable') return load().then(function(){S.sheet=null;S.view='security';render();toast('Multi-factor authentication disabled');});
