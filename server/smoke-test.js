@@ -1,5 +1,6 @@
 // End-to-end API check on a throwaway database. Run: npm test
-process.env.DB_PATH = require('path').join(require('os').tmpdir(), 'ptb-test-' + Date.now() + '.db');
+process.env.PGLITE_DIR = 'memory'; // embedded Postgres, throwaway
+delete process.env.DATABASE_URL;
 process.env.NODE_ENV = 'test';
 process.env.ALLOW_SANDBOX_FUNDING = 'true'; // isolated test database only
 process.env.ADMIN_EMAIL = 'admin@primetrust.test';
@@ -53,7 +54,7 @@ function client() {
   const pending = (await admin('GET', '/api/admin/requests')).body.requests;
   assert.equal(pending.length, 2, 'admin sees pending requests');
   const dbForKyc = require('./db');
-  const storedKyc = dbForKyc.prepare('SELECT vr.id_front_data FROM verification_requests vr JOIN users u ON u.id=vr.user_id WHERE u.email=?').get('ada@example.com');
+  const storedKyc = await dbForKyc.get('SELECT vr.id_front_data FROM verification_requests vr JOIN users u ON u.id=vr.user_id WHERE u.email=?', ['ada@example.com']);
   assert.ok(storedKyc && storedKyc.id_front_data.startsWith('enc:v'), 'identity documents encrypted at rest');
   const adaRequest = pending.find(x => x.email === 'ada@example.com');
   const viewedDocs = await admin('GET', '/api/admin/requests/' + adaRequest.id);
@@ -118,7 +119,7 @@ function client() {
 
   // Ledger must balance: all account balances sum to zero across user + system accounts.
   const db = require('./db');
-  const sum = db.prepare('SELECT SUM(balance) s FROM accounts').get().s;
+  const sum = (await db.get('SELECT SUM(balance) s FROM accounts')).s;
   assert.equal(sum, 0, 'ledger sums to zero');
 
   // Lockout after repeated bad logins

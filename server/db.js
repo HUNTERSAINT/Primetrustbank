@@ -1,256 +1,139 @@
-const path = require('path');
+// Data layer. Production uses Postgres (DATABASE_URL, for example Supabase).
+// Without DATABASE_URL (local development and tests) it falls back to an embedded Postgres (PGlite),
+// so the same SQL runs everywhere.
+//
+// API (all async):
+//   db.get(sql, params)  -> first row or undefined
+//   db.all(sql, params)  -> array of rows
+//   db.run(sql, params)  -> { changes, lastInsertRowid }
+//   db.tx(fn)            -> runs fn in one database transaction (commit on success, rollback on throw).
+//                           Every db.* call made while fn runs, including from helper functions, joins it.
+// SQL may use "?" placeholders and "INSERT OR IGNORE"; both are translated for Postgres.
 const fs = require('fs');
-const Database = require('better-sqlite3');
+const path = require('path');
+const { AsyncLocalStorage } = require('async_hooks');
 
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'bank.db');
-fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+const als = new AsyncLocalStorage();
+let driver;
 
-const db = new Database(DB_PATH);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+// Tables whose INSERT should return the generated id as lastInsertRowid.
+const ID_TABLES = new Set(['users', 'accounts', 'cards', 'card_requests', 'transactions', 'verification_requests',
+  'admin_audit', 'support_sessions', 'support_messages', 'password_reset_tokens', 'notifications', 'disputes',
+  'saved_beneficiaries', 'scheduled_transfers']);
 
-// All money is stored as integer minor units (cents). Never floats.
-db.exec(`
-CREATE TABLE IF NOT EXISTS users (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  email         TEXT NOT NULL UNIQUE,
-  full_name     TEXT NOT NULL,
-  password_hash TEXT NOT NULL,
-  pin_hash      TEXT NOT NULL,
-  failed_logins INTEGER NOT NULL DEFAULT 0,
-  locked_until  INTEGER NOT NULL DEFAULT 0,
-  failed_pins   INTEGER NOT NULL DEFAULT 0,
-  pin_locked_until INTEGER NOT NULL DEFAULT 0,
-  created_at    INTEGER NOT NULL
-);
+const toNum = (rows) => rows.map((r) => {
+  for (const k in r) if (typeof r[k] === 'bigint') r[k] = Number(r[k]);
+  return r;
+});
 
-CREATE TABLE IF NOT EXISTS accounts (
-  id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id        INTEGER REFERENCES users(id),
-  account_number TEXT NOT NULL UNIQUE,
-  kind           TEXT NOT NULL DEFAULT 'user' CHECK (kind IN ('user','system')),
-  currency       TEXT NOT NULL DEFAULT 'USD',
-  balance        INTEGER NOT NULL DEFAULT 0,
-  CHECK (kind = 'system' OR balance >= 0)
-);
-
-CREATE TABLE IF NOT EXISTS cards (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  account_id INTEGER NOT NULL REFERENCES accounts(id),
-  last4      TEXT NOT NULL,
-  expiry     TEXT NOT NULL,
-  frozen     INTEGER NOT NULL DEFAULT 0
-);
-
--- One row per account per movement. A transfer writes two rows sharing a group_id.
-CREATE TABLE IF NOT EXISTS transactions (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  group_id      TEXT NOT NULL,
-  account_id    INTEGER NOT NULL REFERENCES accounts(id),
-  type          TEXT NOT NULL,
-  amount        INTEGER NOT NULL,          -- signed: negative = money out
-  balance_after INTEGER NOT NULL,
-  counterparty  TEXT NOT NULL,
-  note          TEXT,
-  created_at    INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_tx_account ON transactions(account_id, id DESC);
-
-CREATE TABLE IF NOT EXISTS idempotency (
-  user_id    INTEGER NOT NULL,
-  key        TEXT NOT NULL,
-  response   TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  PRIMARY KEY (user_id, key)
-);
-`);
-
-// Identity review is performed by a configured bank administrator.
-const userColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
-if (!userColumns.includes('verification_status')) {
-  db.exec("ALTER TABLE users ADD COLUMN verification_status TEXT NOT NULL DEFAULT 'pending' CHECK (verification_status IN ('pending','submitted','approved','rejected'))");
-}
-if (!userColumns.includes('verification_submitted_at')) {
-  db.exec('ALTER TABLE users ADD COLUMN verification_submitted_at INTEGER');
-}
-db.exec(`
-CREATE TABLE IF NOT EXISTS verification_requests (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL UNIQUE REFERENCES users(id),
-  legal_name TEXT NOT NULL,
-  date_of_birth TEXT NOT NULL,
-  address TEXT NOT NULL,
-  id_type TEXT NOT NULL,
-  review_status TEXT NOT NULL DEFAULT 'submitted' CHECK (review_status IN ('submitted','approved','rejected')),
-  admin_note TEXT,
-  submitted_at INTEGER NOT NULL,
-  reviewed_at INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_verification_status ON verification_requests(review_status, submitted_at);
-`);
-
-// System accounts that receive airtime/bill payments and fund sandbox deposits.
-const ensureSystem = db.prepare(
-  `INSERT OR IGNORE INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, ?, 'system', 0)`
-);
-ensureSystem.run('SYS-BILLERS');
-ensureSystem.run('SYS-SANDBOX');
-ensureSystem.run('SYS-ADMIN-ADJUST');
-
-
-const adminColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
-if (!adminColumns.includes('status')) {
-  db.exec("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended'))");
-}
-db.exec(`
-CREATE TABLE IF NOT EXISTS admin_audit (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  admin_email TEXT NOT NULL,
-  action TEXT NOT NULL,
-  target_user_id INTEGER,
-  amount INTEGER,
-  details TEXT,
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit(created_at DESC);
-CREATE TABLE IF NOT EXISTS support_sessions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL UNIQUE REFERENCES users(id),
-  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS support_messages (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  session_id INTEGER NOT NULL REFERENCES support_sessions(id),
-  sender_role TEXT NOT NULL CHECK (sender_role IN ('user','admin')),
-  sender_name TEXT NOT NULL,
-  message TEXT NOT NULL,
-  is_read INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_support_messages_session ON support_messages(session_id,id);
-`);
-
-
-const verificationColumns = db.prepare('PRAGMA table_info(verification_requests)').all().map((c) => c.name);
-for (const column of ['id_front_data','id_back_data','selfie_data']) {
-  if (!verificationColumns.includes(column)) db.exec('ALTER TABLE verification_requests ADD COLUMN ' + column + ' TEXT');
+function adapt(sql) {
+  let s = String(sql);
+  let ignore = false;
+  if (/^\s*INSERT\s+OR\s+IGNORE\s+INTO/i.test(s)) {
+    s = s.replace(/INSERT\s+OR\s+IGNORE\s+INTO/i, 'INSERT INTO');
+    ignore = true;
+  }
+  let out = '', n = 0, q = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) {
+      out += c;
+      if (c === q) { if (s[i + 1] === q) out += s[++i]; else q = null; }
+      continue;
+    }
+    if (c === "'" || c === '"') { q = c; out += c; continue; }
+    if (c === '?') { out += '$' + (++n); continue; }
+    out += c;
+  }
+  if (ignore) out = out.replace(/[\s;]*$/, '') + ' ON CONFLICT DO NOTHING';
+  return out;
 }
 
-
-const cardColumns = db.prepare('PRAGMA table_info(cards)').all().map((c) => c.name);
-if (!cardColumns.includes('demo_number')) db.exec('ALTER TABLE cards ADD COLUMN demo_number TEXT');
-if (!cardColumns.includes('demo_cvv')) db.exec('ALTER TABLE cards ADD COLUMN demo_cvv TEXT');
-db.exec(`CREATE TABLE IF NOT EXISTS card_requests (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER NOT NULL UNIQUE REFERENCES users(id),status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','granted','rejected')),requested_at INTEGER NOT NULL,reviewed_at INTEGER,reviewed_by TEXT);
-CREATE TABLE IF NOT EXISTS migration_flags (name TEXT PRIMARY KEY,completed_at INTEGER NOT NULL);`);
-if (!db.prepare('SELECT 1 FROM migration_flags WHERE name=?').get('remove-auto-demo-cards-v1')) { db.prepare('DELETE FROM cards').run(); db.prepare('INSERT INTO migration_flags (name,completed_at) VALUES (?,?)').run('remove-auto-demo-cards-v1',Date.now()); }
-if (!cardColumns.includes('activated')) db.exec('ALTER TABLE cards ADD COLUMN activated INTEGER NOT NULL DEFAULT 1');
-if (!cardColumns.includes('online_enabled')) db.exec('ALTER TABLE cards ADD COLUMN online_enabled INTEGER NOT NULL DEFAULT 1');
-if (!cardColumns.includes('international_enabled')) db.exec('ALTER TABLE cards ADD COLUMN international_enabled INTEGER NOT NULL DEFAULT 0');
-if (!cardColumns.includes('daily_limit')) db.exec('ALTER TABLE cards ADD COLUMN daily_limit INTEGER NOT NULL DEFAULT 250000');
-if (!cardColumns.includes('card_pin_hash')) db.exec('ALTER TABLE cards ADD COLUMN card_pin_hash TEXT');
-const mfaColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
-if (!mfaColumns.includes('mfa_enabled')) db.exec('ALTER TABLE users ADD COLUMN mfa_enabled INTEGER NOT NULL DEFAULT 0');
-db.exec(`
-CREATE TABLE IF NOT EXISTS mfa_challenges (
-  id TEXT PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id),
-  purpose TEXT NOT NULL CHECK(purpose IN ('login','enable')),
-  code_hash TEXT NOT NULL,
-  expires_at INTEGER NOT NULL,
-  attempts INTEGER NOT NULL DEFAULT 0,
-  used_at INTEGER,
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_mfa_challenges_user ON mfa_challenges(user_id,created_at DESC);
-`);
-const sessionColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
-if (!sessionColumns.includes('session_version')) {
-  db.exec('ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0');
+async function query(sql, params) {
+  const conn = als.getStore() || driver;
+  const p = (params || []).map((v) => (v === undefined ? null : v));
+  return conn.query(adapt(sql), p);
 }
-db.exec(`
-CREATE TABLE IF NOT EXISTS admin_sessions (
-  jti TEXT PRIMARY KEY,
-  admin_email TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,
-  revoked_at INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_admin_sessions_expiry ON admin_sessions(expires_at);
-`);
+async function get(sql, params) { return (await query(sql, params)).rows[0]; }
+async function all(sql, params) { return (await query(sql, params)).rows; }
+async function run(sql, params) {
+  let text = String(sql);
+  const m = /^\s*INSERT\s+(?:OR\s+\w+\s+)?INTO\s+([a-z_]+)/i.exec(text);
+  const wantsId = !!(m && ID_TABLES.has(m[1].toLowerCase()) && !/\bRETURNING\b/i.test(text));
+  if (wantsId) text = adapt(text).replace(/[\s;]*$/, '') + ' RETURNING id';
+  const r = await (async () => {
+    const conn = als.getStore() || driver;
+    const p = (params || []).map((v) => (v === undefined ? null : v));
+    return conn.query(wantsId ? text : adapt(text), p);
+  })();
+  return { changes: r.rowCount, lastInsertRowid: wantsId && r.rows[0] ? r.rows[0].id : undefined };
+}
+async function tx(fn) {
+  if (als.getStore()) return fn(); // already inside a transaction: join it
+  try {
+    return await driver.tx((conn) => als.run(conn, () => fn()));
+  } catch (e) {
+    // Work that must survive the rollback (for example counting a wrong PIN) is attached to the error.
+    if (e && typeof e.afterRollback === 'function') { try { await e.afterRollback(); } catch (_) { /* ignore */ } }
+    throw e;
+  }
+}
 
+async function init() {
+  if (process.env.DATABASE_URL) {
+    const pg = require('pg');
+    pg.types.setTypeParser(20, (v) => parseInt(v, 10));    // BIGINT / COUNT -> number
+    pg.types.setTypeParser(1700, (v) => parseFloat(v));     // NUMERIC (SUM of BIGINT) -> number
+    const pool = new pg.Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: process.env.PGSSL === 'disable' ? false : { rejectUnauthorized: false },
+      max: Number(process.env.PG_POOL_MAX || 10),
+      connectionTimeoutMillis: 15000
+    });
+    pool.on('error', (e) => console.error('Postgres pool error:', e.message));
+    const wrap = (c) => async (text, params) => {
+      const r = await c.query(text, params);
+      return { rows: toNum(r.rows || []), rowCount: r.rowCount };
+    };
+    driver = {
+      query: wrap(pool),
+      exec: (sql) => pool.query(sql),
+      tx: async (fn) => {
+        const c = await pool.connect();
+        try {
+          await c.query('BEGIN');
+          const out = await fn({ query: wrap(c) });
+          await c.query('COMMIT');
+          return out;
+        } catch (e) {
+          try { await c.query('ROLLBACK'); } catch (_) { /* ignore */ }
+          throw e;
+        } finally { c.release(); }
+      }
+    };
+  } else {
+    if (process.env.NODE_ENV === 'production') throw new Error('DATABASE_URL is required in production');
+    const { PGlite } = await import('@electric-sql/pglite');
+    const dir = process.env.PGLITE_DIR === 'memory' ? undefined : (process.env.PGLITE_DIR || path.join(__dirname, '..', 'data', 'pgdata'));
+    if (dir) fs.mkdirSync(path.dirname(dir), { recursive: true });
+    const lite = dir ? new PGlite(dir) : new PGlite();
+    await lite.waitReady;
+    const wrap = (c) => async (text, params) => {
+      const r = await c.query(text, params || []);
+      return { rows: toNum(r.rows || []), rowCount: r.affectedRows != null ? r.affectedRows : (r.rows || []).length };
+    };
+    driver = {
+      query: wrap(lite),
+      exec: (sql) => lite.exec(sql),
+      tx: (fn) => lite.transaction((t) => fn({ query: wrap(t) }))
+    };
+  }
+  await driver.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
+}
 
-/* Customer self-service expansion: durable notifications, disputes, saved recipients,
-   scheduled transfers and account controls. */
-db.exec(`
-CREATE TABLE IF NOT EXISTS password_reset_tokens (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL REFERENCES users(id),
-  token_hash TEXT NOT NULL UNIQUE,
-  expires_at INTEGER NOT NULL,
-  used_at INTEGER,
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id,created_at DESC);
-CREATE TABLE IF NOT EXISTS user_sessions (
-  jti TEXT PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id),
-  user_agent TEXT,
-  created_at INTEGER NOT NULL,
-  last_seen_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,
-  revoked_at INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id,created_at DESC);
-CREATE TABLE IF NOT EXISTS notifications (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL REFERENCES users(id),
-  title TEXT NOT NULL,
-  message TEXT NOT NULL,
-  category TEXT NOT NULL DEFAULT 'account',
-  is_read INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id,id DESC);
-CREATE TABLE IF NOT EXISTS disputes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL REFERENCES users(id),
-  transaction_id INTEGER NOT NULL REFERENCES transactions(id),
-  reason TEXT NOT NULL,
-  details TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','investigating','resolved','rejected')),
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
-  UNIQUE(user_id,transaction_id)
-);
-CREATE TABLE IF NOT EXISTS saved_beneficiaries (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL REFERENCES users(id),
-  account_number TEXT NOT NULL,
-  display_name TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
-  UNIQUE(user_id,account_number)
-);
-CREATE TABLE IF NOT EXISTS scheduled_transfers (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  user_id INTEGER NOT NULL REFERENCES users(id),
-  recipient_account TEXT NOT NULL,
-  recipient_name TEXT NOT NULL,
-  amount INTEGER NOT NULL CHECK(amount > 0),
-  note TEXT,
-  scheduled_at INTEGER NOT NULL,
-  status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN ('scheduled','completed','cancelled','failed')),
-  created_at INTEGER NOT NULL,
-  processed_at INTEGER,
-  failure_reason TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_transfers(status,scheduled_at);
-CREATE TABLE IF NOT EXISTS account_limits (
-  user_id INTEGER PRIMARY KEY REFERENCES users(id),
-  daily_transfer_limit INTEGER NOT NULL DEFAULT 500000,
-  daily_payment_limit INTEGER NOT NULL DEFAULT 100000,
-  updated_at INTEGER NOT NULL
-);
-`);
-module.exports = db;
+module.exports = {
+  ready: init(),
+  get, all, run, tx,
+  inTx: () => !!als.getStore(),
+  exec: (sql) => driver.exec(sql)
+};
