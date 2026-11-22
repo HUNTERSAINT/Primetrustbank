@@ -188,7 +188,7 @@
       '<div class="stdcard"><span class="mc"></span><span><b>Acct '+esc(me.account.number)+'</b></span><button class="copy" data-act="copy" aria-label="Copy account number">'+ic('copy')+'Copy</button></div>'+
       '<div class="balrow"><div><div class="lab">Available balance <button data-act="eye" aria-label="'+(S.hidden?'Show':'Hide')+' balance">'+ic(S.hidden?'eyeoff':'eye','font-size:14px')+'</button></div><div class="big">'+(S.hidden?'USD ••••••':'USD '+money(me.account.balance))+'</div></div><button class="addf" data-act="addfunds">'+ic('plus','font-size:12px')+'Add funds</button></div></div>'+
       '<div class="panel" style="margin-top:12px;padding:12px 6px"><div class="acts"><button class="act" data-act="go" data-v="transfers"><i>'+ic('up')+'</i>Transfer</button><button class="act" data-act="go" data-v="payments"><i>'+ic('bill')+'</i>Payments</button><button class="act" data-act="go" data-v="card"><i>'+ic('detail')+'</i>Cards</button><button class="act" data-act="go" data-v="accounts"><i>'+ic('detail')+'</i>Accounts</button></div></div>'+
-      '<div class="sub">Banking services</div><div class="panel page-links">'+pageLink('transfers','up','Transfers','Send money and manage recipients')+pageLink('payments','bill','Payments','Airtime and bills')+pageLink('accounts','detail','Accounts','Account details and balance')+pageLink('history','swap','Statements & activity','Search and export transactions')+pageLink('savings','plus','Savings goals','Track a personal target')+pageLink('security','user','Profile & security','Manage your account')+pageLink('services','dots','More banking','Notifications, scheduled payments and account controls')+'</div>'+
+      '<div class="sub">Banking services</div><div class="panel page-links">'+pageLink('transfers','up','Transfers','Send money and manage recipients')+pageLink('payments','bill','Payments','Pay everyday bills')+pageLink('accounts','detail','Accounts','Account details and balance')+pageLink('history','swap','Statements & activity','Search and export transactions')+pageLink('savings','plus','Savings goals','Track a personal target')+pageLink('security','user','Profile & security','Manage your account')+pageLink('services','dots','More banking','Notifications, scheduled payments and account controls')+'</div>'+
       '<div class="sub">Recent recipients</div><div class="benes">'+benes+'</div><div class="trh"><b>Recent activity</b><button data-act="go" data-v="history">View all</button></div>'+trs+'</section>'+dock('home');
   }
   function vHistory() {
@@ -218,10 +218,15 @@
   }
   function vCard() {
     var me=S.me,c=me.card;
+    if(!c){
+      var status=me.card_request&&me.card_request.status;
+      var copy=status==='pending'?'Your request is waiting for an administrator to review it.':status==='rejected'?'Your previous request was not approved. You can submit a new request.':'Request a card for your account. An administrator will review it before issuing a demo card.';
+      return '<section class="screen">'+pageHead('Your card','Request and manage your demo card')+'<div class="panel card-request-panel"><div class="card-request-icon">'+ic('detail')+'</div><h2>No card issued</h2><p class="lead">'+esc(copy)+'</p>'+(status==='pending'?'<span class="status-chip">Awaiting admin approval</span>':'<button class="pillbtn w" data-act="request-card">'+(status==='rejected'?'Request again':'Request a card')+'</button>')+'<p class="hint">Cards are demo-only and are issued manually after your request. No real payment card is created.</p></div></section>'+dock('card');
+    }
     var outs=S.txs.filter(function(t){return t.amount<0;}).slice(0,3).map(txRow).join('')||'<p class="empty">No card activity yet.</p>';
     return '<section class="screen"><div class="hd"><button class="circ" data-act="go" data-v="home" aria-label="Back">'+ic('back')+'</button><h4>Manage card</h4><span></span></div>'+
       '<div class="panel cardbal"><div><small>US Dollar</small><b>'+money(me.account.balance)+'</b></div><button class="addf" data-act="addfunds">'+ic('plus','font-size:12px')+'Add money</button></div>'+
-      '<div class="cardwrap"><div class="cardface bigcard'+(c.frozen?' frozen':'')+'">'+artCard+'<span class="tt">Prime Trust</span><span class="badge">PRIME</span><span class="num">4556 •••• •••• '+esc(c.last4)+'</span><span class="nm">'+esc(me.name)+'</span><span class="exp">'+esc(c.expiry)+'</span></div>'+(c.frozen?'<div class="frozenlbl">FROZEN</div>':'')+'</div>'+
+      '<div class="cardwrap"><div class="cardface bigcard'+(c.frozen?' frozen':'')+'">'+artCard+'<span class="tt">Prime Trust</span><span class="badge">PRIME</span><span class="num">•••• •••• •••• '+esc(c.last4)+'</span><span class="nm">'+esc(me.name)+'</span><span class="exp">'+esc(c.expiry)+'</span></div>'+(c.frozen?'<div class="frozenlbl">FROZEN</div>':'')+'</div>'+
       '<div class="acts s3acts"><button class="act" data-act="sheet" data-s="details"><i>'+ic('detail')+'</i>Details</button><button class="act" data-act="freeze" aria-pressed="'+c.frozen+'"><i>'+ic('snow')+'</i>'+(c.frozen?'Unfreeze':'Freeze')+'</button><button class="act" data-act="sheet" data-s="card-replace"><i>'+ic('detail')+'</i>Replace</button></div>'+
       '<div class="sub">Card controls</div><div class="panel"><form class="form" data-form="card-settings">'+
       '<label class="field"><span><input style="width:auto" type="checkbox" name="activated" '+(c.activated?'checked':'')+'> Card activated</span></label>'+
@@ -229,7 +234,7 @@
       '<label class="field"><span><input style="width:auto" type="checkbox" name="international_enabled" '+(c.international_enabled?'checked':'')+'> International purchases</span></label>'+
       '<label class="field">Daily card limit (USD)<input name="daily_limit" type="number" min="100" max="100000" step=".01" value="'+(c.daily_limit/100)+'" required></label>'+
       '<label class="field">Transaction PIN<input name="transaction_pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label>'+
-      '<p class="hint">Demo card controls only. These preferences are not connected to a real card network or authorization processor.</p><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Save card controls</button></form></div>'+
+      '<p class="hint">Demo card controls only. No real card network or authorization processor is connected.</p><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Save card controls</button></form></div>'+
       '<div class="sub">Card PIN</div><div class="panel"><form class="form" data-form="card-pin"><label class="field">New card PIN<input name="card_pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label><label class="field">Confirm with transaction PIN<input name="transaction_pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label><p class="err" role="alert"></p><button class="pillbtn d" type="submit">'+(c.card_pin_set?'Change card PIN':'Set card PIN')+'</button></form></div>'+
       '<div class="trh"><b>Recent Transactions</b><button data-act="go" data-v="history">View all</button></div>'+outs+'</section>'+dock('card');
   }
@@ -256,10 +261,9 @@
       '<div class="trh"><b>Recent transfers</b><button data-act="go" data-v="history">All activity</button></div>'+recent+'</section>'+dock('transfers');
   }
   function vPayments() {
-    return '<section class="screen">'+pageHead('Payments','Airtime and everyday bills')+
+    return '<section class="screen">'+pageHead('Payments','Everyday bill payments')+
       '<div class="panel"><h3>Pay a bill</h3><p class="lead" style="margin:8px 0 14px">Choose a service and enter the required customer details.</p><button class="pillbtn w" data-act="sheet" data-s="bills">Pay bills</button></div>'+
-      '<div class="panel" style="margin-top:12px"><h3>Mobile airtime</h3><p class="lead" style="margin:8px 0 14px">Top up a mobile number using your available balance.</p><button class="pillbtn d" data-act="sheet" data-s="airtime">Buy airtime</button></div>'+
-      '<div class="trh"><b>Recent payments</b><button data-act="go" data-v="history">View activity</button></div>'+ (S.txs.filter(function(t){return t.type==='bill'||t.type==='airtime';}).slice(0,5).map(txRow).join('')||'<p class="empty">No bill or airtime payments yet.</p>')+
+      '<div class="trh"><b>Recent bill payments</b><button data-act="go" data-v="history">View activity</button></div>'+ (S.txs.filter(function(t){return t.type==='bill';}).slice(0,5).map(txRow).join('')||'<p class="empty">No bill payments yet.</p>')+
       '</section>'+dock('payments');
   }
   function vSavings() {
@@ -308,13 +312,6 @@
       '<div class="panel receipt-details"><div class="kv"><span>Recipient account</span><b>'+esc(d.to_account||'')+'</b></div><div class="kv"><span>Transfer amount</span><b>USD '+money(cents)+'</b></div><div class="kv"><span>Fee</span><b>USD 0.00</b></div><div class="kv"><span>Total</span><b>USD '+money(cents)+'</b></div>'+(d.note?'<div class="kv"><span>Note</span><b>'+esc(d.note)+'</b></div>':'')+'</div>'+
       '<form class="form" data-form="send-confirm"><label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required autocomplete="off"></label><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Confirm & send</button><button type="button" class="pillbtn d" data-act="edit-transfer">Edit transfer</button></form>');
   }
-  function sAirtime() {
-    return sheetWrap('Buy airtime', '<form class="form" data-form="airtime" style="margin-top:0">' +
-      '<label class="field">Network<select name="network">' + S.meta.networks.map(function (n) { return '<option>' + esc(n) + '</option>'; }).join('') + '</select></label>' +
-      '<label class="field">Phone number<input name="phone" inputmode="tel" required placeholder="08012345678"></label>' +
-      '<label class="field">Amount (USD)<input name="amount" type="number" inputmode="decimal" min="0.01" max="500" step="0.01" required placeholder="0.00"></label>' + pinField() +
-      '<p class="err" role="alert"></p><button class="pillbtn w" type="submit">Buy airtime</button></form>');
-  }
   function sBills() {
     return sheetWrap('Pay a bill', '<form class="form" data-form="bills" style="margin-top:0">' +
       '<label class="field">Bill type<select name="biller">' + S.meta.billers.map(function (n) { return '<option>' + esc(n) + '</option>'; }).join('') + '</select></label>' +
@@ -347,10 +344,10 @@
     var me = S.me;
     return sheetWrap('Card details',
       '<div class="kv"><span>Card holder</span><b>' + esc(me.name) + '</b></div>' +
-      '<div class="kv"><span>Card number</span><b>4556 •••• •••• ' + esc(me.card.last4) + '</b></div>' +
+      '<div class="kv"><span>Card number</span><b>•••• •••• •••• ' + esc(me.card.last4) + '</b></div>' +
       '<div class="kv"><span>Expires</span><b>' + esc(me.card.expiry) + '</b></div>' +
       '<div class="kv"><span>Status</span><b>' + (me.card.frozen ? 'Frozen' : 'Active') + '</b></div>' +
-      '<div class="kv"><span>Linked account</span><b>' + esc(me.account.number) + '</b></div>');
+      '<div class="kv"><span>Linked account</span><b>' + esc(me.account.number) + '</b></div>' + '<p class="hint">Full demo card number is restricted to administrator view. CVV is never stored.</p>');
   }
   function sProfile() {
     var me = S.me;
@@ -439,7 +436,7 @@
       default: html = vWelcome();
     }
     if (S.sheet && S.me) {
-      html += ({ send: function () { return sSend(prefill); }, 'send-confirm': sSendConfirm, airtime: sAirtime, bills: sBills, fund: sFund, details: sDetails, profile: sProfile, goal: sGoal, 'mfa-disable': sMfaDisable, 'card-replace': sCardReplace }[S.sheet] || function () { return ''; })();
+      html += ({ send: function () { return sSend(prefill); }, 'send-confirm': sSendConfirm, bills: sBills, fund: sFund, details: sDetails, profile: sProfile, goal: sGoal, 'mfa-disable': sMfaDisable, 'card-replace': sCardReplace }[S.sheet] || function () { return ''; })();
     }
     if (S.me && S.impersonation && S.impersonation.active) html = '<div class="impersonation-banner"><div><b>Admin session · Viewing as customer</b><small>Administrator: '+esc(S.impersonation.admin_email||'')+'</small></div><button type="button" data-act="return-admin">Return to Admin</button></div>'+html;
     app.innerHTML = html;
@@ -475,6 +472,7 @@
     if (a === 'refresh-support') return go('support');
     if (a === 'return-admin') { if(!confirm('End this customer session and return to the admin console?'))return; api('POST','/api/admin/impersonate-return',{}).then(function(){window.location.href='/api/admin/portal';}).catch(function(e){toast(e.message);}); return; }
     if (a === 'sheet') return openSheet(t.dataset.s);
+    if (a === 'request-card') { if(!confirm('Submit a request for a demo card? An administrator must approve it first.'))return; t.disabled=true; api('POST','/api/card/request',{}).then(function(){return load();}).then(function(){S.view='card';render();toast('Card request submitted');}).catch(function(e){t.disabled=false;toast(e.message);}); return; }
     if (a === 'goal') return openSheet('goal');
     if (a === 'clear-goal') { S.goal=null; try{localStorage.removeItem('ptb_goal');}catch(_){} S.sheet=null; S.view='savings'; return render(); }
     if (a === 'close') { S.sheet = null; return render(); }
@@ -578,7 +576,6 @@
     }
     else if (kind === 'send-review') { api('GET','/api/accounts/lookup/'+encodeURIComponent(d.to_account)).then(function(rec){S.transferDraft={to_account:d.to_account,amount:d.amount,note:d.note,recipient:rec.name};S.sheet='send-confirm';render();}).catch(function(e){busy(form,false);setErr(form,e.message);});return; }
     else if (kind === 'send-confirm') p = api('POST', '/api/transfers', { to_account: S.transferDraft.to_account, amount: S.transferDraft.amount, pin: d.pin, note: S.transferDraft.note }, S.idem);
-    else if (kind === 'airtime') p = api('POST', '/api/airtime', { network: d.network, phone: d.phone, amount: d.amount, pin: d.pin }, S.idem);
     else if (kind === 'bills') p = api('POST', '/api/bills', { biller: d.biller, reference: d.reference, amount: d.amount, pin: d.pin }, S.idem);
     else return;
     p.then(function (res) {
@@ -598,7 +595,7 @@
       if (kind === 'beneficiary') return load().then(function(){S.view='beneficiary-manage';render();toast('Recipient saved');});
 
       if (kind === 'login' || kind === 'register' || kind === 'verification') return load().then(function () { S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; render(); toast(kind === 'verification' ? 'Submitted for administrator review' : kind === 'register' ? 'Account created; KYC submitted for review' : 'Logged in'); });
-      var msg = (kind === 'send' || kind === 'send-confirm') ? 'Sent to ' + res.to : kind === 'airtime' ? 'Airtime bought' : 'Bill paid';
+      var msg = (kind === 'send' || kind === 'send-confirm') ? 'Sent to ' + res.to : 'Bill paid';
       if(kind==='send-confirm')S.transferDraft=null;
       return done(msg);
     }).catch(function (e) {
