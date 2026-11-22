@@ -50,7 +50,7 @@
   }
 
   // ---------- transaction display ----------
-  var LABEL = { transfer_out: 'Sent', transfer_in: 'Received', deposit: 'Deposit', airtime: 'Airtime', bill: 'Bill' };
+  var LABEL = { transfer_out: 'Sent', transfer_in: 'Received', external_transfer_pending: 'External transfer request', external_transfer_refund: 'External transfer refund', deposit: 'Deposit', airtime: 'Airtime', bill: 'Bill' };
   var ICON = { transfer_out: 'up', transfer_in: 'down', deposit: 'down', airtime: 'phone', bill: 'bill' };
   function fdate(t) { return new Date(t).toLocaleString('en-US', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }); }
   function txRow(t) {
@@ -58,7 +58,7 @@
     var title = t.type === 'transfer_out' ? 'To ' + t.counterparty : t.type === 'transfer_in' ? 'From ' + t.counterparty : t.counterparty;
     return '<button type="button" class="tr tx-click" data-act="transaction" data-id="' + esc(t.id || t.transaction_id || t.reference || '') + '" aria-label="View transaction details: ' + esc(title) + '"><span class="ti">' + ic(ICON[t.type] || 'swap') + '</span>' +
       '<span class="m"><b>' + esc(title) + '</b><small>' + esc(LABEL[t.type] || 'Payment') + ' · ' + esc(fdate(t.created_at)) + (t.note ? ' · ' + esc(t.note) : '') + '</small></span>' +
-      '<span class="r"><b style="color:' + (neg ? 'var(--fg)' : 'var(--good)') + '">' + (neg ? '-' : '+') + money(Math.abs(t.amount)) + ' USD</b><small>Successful</small></span>' + ic('chev') + '</button>';
+      '<span class="r"><b style="color:' + (neg ? 'var(--fg)' : 'var(--good)') + '">' + (neg ? '-' : '+') + money(Math.abs(t.amount)) + ' USD</b><small>'+(t.type==='external_transfer_pending'?'Pending admin processing':t.type==='external_transfer_refund'?'Refunded':'Successful')+'</small></span>' + ic('chev') + '</button>';
   }
   var artCard = '<svg class="art" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice"><use href="#art"/></svg>';
 
@@ -221,7 +221,7 @@
   function vTransaction() {
     var t=S.selectedTx;if(!t)return '<section class="screen"><p class="empty">Transaction not found.</p><button class="pillbtn d" data-act="go" data-v="history">Back to activity</button></section>';
     var incoming=t.amount>=0, title=t.type==='transfer_out'?'Transfer sent':t.type==='transfer_in'?'Transfer received':t.type==='deposit'?'Deposit':t.type==='airtime'?'Airtime purchase':'Bill payment';
-    var receipt=[ 'PRIME TRUST BANK — TRANSACTION RECEIPT','',title,'Amount: '+(incoming?'+':'-')+' USD '+money(Math.abs(t.amount)),'Status: '+esc(t.status||'Successful'),'Date: '+new Date(t.created_at).toLocaleString(),'Description: '+(t.counterparty||'—'),'Reference: '+(t.reference||t.id||'—'),t.note?'Note: '+t.note:'','Receipt for your recorded account activity.'];
+    var receipt=[ 'PRIME TRUST BANK — TRANSACTION RECEIPT','',title,'Amount: '+(incoming?'+':'-')+' USD '+money(Math.abs(t.amount)),'Status: '+esc(t.type==='external_transfer_pending'?'Pending admin processing':t.type==='external_transfer_refund'?'Refunded':(t.status||'Successful')),'Date: '+new Date(t.created_at).toLocaleString(),'Description: '+(t.counterparty||'—'),'Reference: '+(t.reference||t.id||'—'),t.note?'Note: '+t.note:'','Receipt for your recorded account activity.'];
     return '<section class="screen"><div class="hd"><button class="circ" data-act="go" data-v="history" aria-label="Back">'+ic('back')+'</button><h4>Transaction details</h4><span></span></div>'+
       '<div class="panel receipt-hero"><div class="receipt-mark">'+ic(incoming?'down':'up')+'</div><small>'+esc(title)+'</small><strong class="receipt-amount">'+(incoming?'+':'−')+' USD '+money(Math.abs(t.amount))+'</strong><span class="status-chip">'+esc(t.status||'Successful')+'</span></div>'+
       '<div class="panel receipt-details"><div class="kv"><span>Recipient / sender</span><b>'+esc(t.counterparty||'—')+'</b></div><div class="kv"><span>Transaction type</span><b>'+esc(LABEL[t.type]||t.type||'Payment')+'</b></div><div class="kv"><span>Date & time</span><b>'+esc(new Date(t.created_at).toLocaleString())+'</b></div><div class="kv"><span>Reference</span><b>'+esc(t.reference||t.id||'—')+'</b></div>'+(t.note?'<div class="kv"><span>Note</span><b>'+esc(t.note)+'</b></div>':'')+'</div>'+
