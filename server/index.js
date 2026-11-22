@@ -415,9 +415,9 @@ app.get('/api/admin/transactions', adminAuth, wrap(async (req,res)=>{
 app.get('/api/admin/kyc', adminAuth, wrap(async (req,res)=>{
   const status=String(req.query.status||'pending');
   const wanted=status==='pending'?'submitted':status;
-  if(!['all','submitted','approved','rejected'].includes(wanted)) throw httpErr(400,'Invalid verification status.');
-  const rows=(await db.all("SELECT vr.id,vr.user_id,vr.legal_name,vr.date_of_birth,vr.address,vr.id_type,vr.review_status,vr.admin_note,vr.submitted_at,vr.reviewed_at,u.email,u.full_name,a.account_number FROM verification_requests vr JOIN users u ON u.id=vr.user_id LEFT JOIN accounts a ON a.user_id=u.id AND a.kind='user' "+(wanted==='all'?'':"WHERE vr.review_status=?")+" ORDER BY vr.submitted_at DESC LIMIT 200", [...(wanted==='all'?[]:[wanted])]));
-  res.json({requests:rows});
+  if(!['all','submitted','approved','rejected','upgrade'].includes(wanted)) throw httpErr(400,'Invalid verification status.');
+  const rows=(await db.all("SELECT vr.id,vr.user_id,vr.legal_name,vr.date_of_birth,vr.address,vr.id_type,vr.id_country,vr.id_last4,vr.id_expiry,vr.review_status,vr.admin_note,vr.submitted_at,vr.reviewed_at,vr.upgrade_status,(vr.proof_address_data IS NOT NULL) AS has_proof,u.email,u.full_name,u.kyc_tier,a.account_number FROM verification_requests vr JOIN users u ON u.id=vr.user_id LEFT JOIN accounts a ON a.user_id=u.id AND a.kind='user' "+(wanted==='upgrade'?"WHERE vr.upgrade_status='submitted'":wanted==='all'?'':"WHERE vr.review_status=?")+" ORDER BY vr.submitted_at DESC LIMIT 200", [...(wanted==='all'||wanted==='upgrade'?[]:[wanted])]));
+  res.json({requests:rows.map(r=>({...r,has_proof:!!r.has_proof}))});
 }));
 app.get('/api/admin/disputes',adminAuth,wrap(async (req,res)=>{
   const status=String(req.query.status||'all');
@@ -664,7 +664,8 @@ app.get('/api/me', auth, wrap(async (req, res) => {
   if(req.user.verification_status==='approved')await processDueTransfers(req.user.id);
   const card=(await db.get('SELECT last4,expiry,frozen,activated,online_enabled,international_enabled,daily_limit,card_pin_hash FROM cards WHERE account_id=?', [req.account.id]));
   const cardRequest=(await db.get('SELECT status,requested_at FROM card_requests WHERE user_id=?', [req.user.id]))||null;
-  res.json({name:req.user.full_name,email:req.user.email,verification_status:req.user.verification_status,kyc_tier:req.user.kyc_tier,tier:kyc.tierOf(req.user),mfa_enabled:!!req.user.mfa_enabled,
+  const kycInfo=(await db.get('SELECT admin_note,upgrade_status,upgrade_note,id_expiry FROM verification_requests WHERE user_id=?', [req.user.id]))||null;
+  res.json({name:req.user.full_name,email:req.user.email,verification_status:req.user.verification_status,kyc_tier:req.user.kyc_tier,tier:kyc.tierOf(req.user),kyc:kycInfo,mfa_enabled:!!req.user.mfa_enabled,
     account:{number:req.account.account_number,currency:req.account.currency,balance:req.account.balance},
     card:card?{last4:card.last4,expiry:card.expiry,frozen:!!card.frozen,activated:!!card.activated,online_enabled:!!card.online_enabled,international_enabled:!!card.international_enabled,daily_limit:card.daily_limit,card_pin_set:!!card.card_pin_hash}:null,
     card_request:cardRequest,sandbox_funding:SANDBOX_FUNDING});

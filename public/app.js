@@ -70,19 +70,30 @@
       '<div class="cta"><button class="pillbtn w" data-act="go" data-v="register">Create account</button>' +
       '<button class="pillbtn d" data-act="go" data-v="login">Login</button></div></section>';
   }
+  function kycFields(nameValue) {
+    return '<label class="field">Legal name<input name="legal_name" required minlength="2" maxlength="100" autocomplete="name" value="' + esc(nameValue || '') + '" placeholder="As shown on your ID"></label>' +
+      '<label class="field">Date of birth<input name="date_of_birth" type="date" required autocomplete="bday"></label>' +
+      '<label class="field">Residential address<textarea name="address" required minlength="8" maxlength="250" rows="3" autocomplete="street-address" placeholder="Street, city, state, country"></textarea></label>' +
+      '<label class="field">Government ID type<select name="id_type" required><option value="">Select ID type</option><option>Passport</option><option>Driver license</option><option>National identity card</option><option>Other government ID</option></select></label>' +
+      '<label class="field">Country that issued the ID<input name="id_country" required maxlength="56" autocomplete="country-name" placeholder="e.g. Kenya"></label>' +
+      '<label class="field">ID number<input name="id_number" required minlength="4" maxlength="30" autocomplete="off" placeholder="As printed on the document"></label>' +
+      '<label class="field">ID expiry date<input name="id_expiry" type="date" required></label>' +
+      '<label class="field">Front of ID<input name="id_front" type="file" accept="image/jpeg,image/png,image/webp" required></label>' +
+      '<label class="field">Back of ID (not needed for passports)<input name="id_back" type="file" accept="image/jpeg,image/png,image/webp"></label>' +
+      '<label class="field">Selfie holding your face clearly in view<input name="selfie" type="file" accept="image/jpeg,image/png,image/webp" capture="user" required></label>' +
+      '<label class="field">Proof of address (optional, unlocks higher limits)<input name="proof_address" type="file" accept="image/jpeg,image/png,image/webp"></label>' +
+      '<p class="hint">Your ID number and documents are encrypted. Only authorised Prime Trust reviewers can open them.</p>';
+  }
+  function readKycImages(form) {
+    var f = form.elements;
+    return Promise.all([compressIdFile(f.id_front.files[0]), compressIdFile(f.id_back.files[0]), compressIdFile(f.selfie.files[0]), compressIdFile(f.proof_address.files[0])]);
+  }
   function vAuth(mode) {
     var reg = mode === 'register';
     var kyc = reg ?
       '<div class="section-label">Identity verification</div>' +
       '<p class="lead">Complete KYC now. An administrator will review your documents before banking is enabled.</p>' +
-      '<label class="field">Legal name<input name="legal_name" required minlength="2" maxlength="100" autocomplete="name" placeholder="As shown on your ID"></label>' +
-      '<label class="field">Date of birth<input name="date_of_birth" type="date" required autocomplete="bday"></label>' +
-      '<label class="field">Residential address<textarea name="address" required minlength="8" maxlength="250" rows="3" autocomplete="street-address" placeholder="Street, city, state, country"></textarea></label>' +
-      '<label class="field">Government ID type<select name="id_type" required><option value="">Select ID type</option><option>Passport</option><option>Driver license</option><option>National identity card</option><option>Other government ID</option></select></label>' +
-      '<label class="field">Front of government ID<input name="id_front" type="file" accept="image/jpeg,image/png,image/webp" required></label>' +
-      '<label class="field">Back of ID (optional)<input name="id_back" type="file" accept="image/jpeg,image/png,image/webp"></label>' +
-      '<label class="field">Selfie (optional)<input name="selfie" type="file" accept="image/jpeg,image/png,image/webp" capture="user"></label>' +
-      '<p class="hint">No SSN or ITIN is collected. Identity verification is reviewed by an administrator.</p>' : '';
+      kycFields('') : '';
     return '<section class="screen">' +
       '<div class="hd"><button class="circ" data-act="go" data-v="welcome" aria-label="Back">' + ic('back') + '</button><h4>' + (reg ? 'Create account' : 'Login') + '</h4><span></span></div>' +
       '<form class="form" data-form="' + mode + '" autocomplete="on">' +
@@ -147,28 +158,35 @@
       }catch(e){bitmapFallback();}
     });
   }
+  function levelPanel(me) {
+    var t = me.tier || {}, k = me.kyc || {}, tier = me.kyc_tier || 1;
+    var h = '<div class="panel" style="margin-top:12px"><div class="kv"><span>Verification level</span><b>Level ' + tier + ' (' + esc(t.name || '') + ')</b></div>' +
+      '<div class="kv"><span>Largest single payment</span><b>USD ' + money(t.per_transaction || 0) + '</b></div>' +
+      '<div class="kv"><span>Daily transfers</span><b>USD ' + money(t.daily_transfer || 0) + '</b></div></div>';
+    if (tier < 2) {
+      if (k.upgrade_status === 'submitted') h += '<p class="hint" style="margin-top:12px">Your proof of address is being reviewed.</p>';
+      else h += (k.upgrade_status === 'rejected' && k.upgrade_note ? '<p class="err" style="margin-top:12px">Not accepted: ' + esc(k.upgrade_note) + '</p>' : '') +
+        '<form class="form" data-form="upgrade" style="margin-top:12px"><div class="section-label">Raise your limits</div>' +
+        '<label class="field">Proof of address (recent utility bill or bank statement)<input name="proof_address" type="file" accept="image/jpeg,image/png,image/webp" required></label>' +
+        '<p class="err" role="alert"></p><button class="pillbtn w" type="submit">Upload for review</button></form>';
+    }
+    return h;
+  }
   function vVerification() {
     var me = S.me, state = me.verification_status || 'pending';
     var heading = state === 'approved' ? 'Identity verified' : state === 'rejected' ? 'Review needed' : state === 'submitted' ? 'Verification in review' : 'Verify your identity';
     var copy = state === 'approved' ? 'Your identity has been approved. Your banking features are ready.' :
-      state === 'rejected' ? 'Your verification was not approved. Please review your details and submit them again.' :
+      state === 'rejected' ? 'Your verification was not approved' + ((me.kyc && me.kyc.admin_note) ? ': ' + me.kyc.admin_note + '.' : '.') + ' Please correct your details and submit them again.' :
       state === 'submitted' ? 'Your details have been sent to our verification team. We will enable banking once an administrator approves your identity.' :
       'Complete this short form. A Prime Trust administrator will review your identity before you can use banking features.';
     return '<section class="screen">' + 
       '<div class="brand">Prime Trust</div><div class="panel" style="margin-top:18px">' +
       '<div class="ti" style="width:52px;height:52px;border-radius:16px;margin-bottom:16px">' + ic(state === 'approved' ? 'detail' : 'user') + '</div>' +
       '<h2>' + esc(heading) + '</h2><p class="lead">' + esc(copy) + '</p>' +
-      (state === 'approved' ? '<button class="pillbtn w" data-act="go" data-v="home">Continue to banking</button>' :
+      (state === 'approved' ? levelPanel(me) + '<button class="pillbtn w" data-act="go" data-v="home" style="margin-top:12px">Continue to banking</button>' :
       state === 'submitted' ? '<div class="subrow" style="margin-top:16px">Status: <b>Pending administrator approval</b></div><button class="pillbtn d" style="margin-top:12px" data-act="logout">Log out</button>' :
       '<form class="form" data-form="verification" style="margin-top:16px">' +
-      '<label class="field">Legal name<input name="legal_name" required minlength="2" maxlength="100" value="' + esc(me.name) + '" autocomplete="name"></label>' +
-      '<label class="field">Date of birth<input name="date_of_birth" type="date" required></label>' +
-      '<label class="field">Residential address<textarea name="address" required minlength="8" maxlength="250" rows="3" placeholder="Street, city, state, country"></textarea></label>' +
-      '<label class="field">Government ID type<select name="id_type" required><option value="">Select ID type</option><option>Passport</option><option>Driver license</option><option>National identity card</option><option>Other government ID</option></select></label>' +
-      '<label class="field">Front of government ID<input name="id_front" type="file" accept="image/jpeg,image/png,image/webp" required></label>' +
-      '<label class="field">Back of ID (if applicable)<input name="id_back" type="file" accept="image/jpeg,image/png,image/webp"></label>' +
-      '<label class="field">Selfie (optional)<input name="selfie" type="file" accept="image/jpeg,image/png,image/webp" capture="user"></label>' +
-      '<p class="hint">Do not enter your SSN, ITIN, or full ID number here. An administrator will review your submission and may contact you securely for document checks.</p>' +
+      kycFields(me.name) +
       '<p class="err" role="alert"></p><button class="pillbtn w" type="submit">Submit for review</button>' +
       '<button type="button" class="muted" style="padding:8px" data-act="logout">Log out</button></form>') +
       '</div></section>';
@@ -541,19 +559,19 @@
     }
     else if (kind === 'login') p = api('POST', '/api/auth/login', { email: d.email, password: d.password });
     else if (kind === 'register') {
-      var regFront=form.elements.id_front.files[0],regBack=form.elements.id_back.files[0],regSelfie=form.elements.selfie.files[0];
-      p=Promise.all([compressIdFile(regFront),compressIdFile(regBack),compressIdFile(regSelfie)]).then(function(images){
-        d.id_front=images[0];d.id_back=images[1];d.selfie=images[2];
+      p=readKycImages(form).then(function(images){
+        d.id_front=images[0];d.id_back=images[1];d.selfie=images[2];d.proof_address=images[3];
         return api('POST','/api/auth/register',d);
       });
     }
     else if (kind === 'verification') {
-      var frontFile=form.elements.id_front.files[0],backFile=form.elements.id_back.files[0],selfieFile=form.elements.selfie.files[0];
-      p=Promise.all([compressIdFile(frontFile),compressIdFile(backFile),compressIdFile(selfieFile)]).then(function(images){
-        d.id_front=images[0];d.id_back=images[1];d.selfie=images[2];
-        delete d.id_front_file;delete d.id_back_file;delete d.selfie_file;
+      p=readKycImages(form).then(function(images){
+        d.id_front=images[0];d.id_back=images[1];d.selfie=images[2];d.proof_address=images[3];
         return api('POST','/api/verification/submit',d);
       });
+    }
+    else if (kind === 'upgrade') {
+      p=compressIdFile(form.elements.proof_address.files[0]).then(function(img){return api('POST','/api/verification/upgrade',{proof_address:img});});
     }
     else if (kind === 'support') p = api('POST', '/api/support/messages', {message:d.message});
 
@@ -593,6 +611,7 @@
       if (kind === 'limits') return load().then(function(){S.view='limits';render();toast('Limits saved');});
       if (kind === 'beneficiary') return load().then(function(){S.view='beneficiary-manage';render();toast('Recipient saved');});
 
+      if (kind === 'upgrade') return load().then(function(){S.view='verification';render();toast('Proof of address sent for review');});
       if (kind === 'login' || kind === 'register' || kind === 'verification') return load().then(function () { S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; render(); toast(kind === 'verification' ? 'Submitted for administrator review' : kind === 'register' ? 'Account created; KYC submitted for review' : 'Logged in'); });
       var msg = (kind === 'send' || kind === 'send-confirm') ? 'Sent to ' + res.to : 'Bill paid';
       if(kind==='send-confirm')S.transferDraft=null;
