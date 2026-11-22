@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs');
 const crypto = require('crypto');
 const express = require('express');
 const helmet = require('helmet');
@@ -746,6 +747,31 @@ app.use((err, req, res, next) => {
 });
 
 // ---------- static frontend ----------
+// Admin console is deliberately not exposed at the default static-file URLs.
+const ADMIN_PORTAL_PATH = String(process.env.ADMIN_PORTAL_PATH || '').trim();
+const ADMIN_PORTAL_PATH_VALID = /^\/[a-z0-9-]{24,80}$/i.test(ADMIN_PORTAL_PATH) && !ADMIN_PORTAL_PATH.includes('..');
+
+app.get('/admin.html', adminAuth, (req, res) => {
+  res.set('Cache-Control', 'no-store, private');
+  res.sendFile(path.join(__dirname, '..', 'public', 'admin.html'));
+});
+app.get('/admin.js', (req, res) => res.status(404).send('Not found.'));
+
+if (ADMIN_PORTAL_PATH_VALID) {
+  app.get(ADMIN_PORTAL_PATH, (req, res) => {
+    const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.html'), 'utf8');
+    const scriptPath = ADMIN_PORTAL_PATH + '.js';
+    const securedHtml = html.replace(/<script src="\\/admin\\.js[^"]*"><\\/script>/, '<script src="' + scriptPath + '?v=secure-admin-01"></script>');
+    res.set('Cache-Control', 'no-store, private');
+    res.type('html').send(securedHtml);
+  });
+  app.get(ADMIN_PORTAL_PATH + '.js', (req, res) => {
+    res.set('Cache-Control', 'no-store, private');
+    res.sendFile(path.join(__dirname, '..', 'public', 'admin.js'));
+  });
+}
+
+// Serve the customer app and its assets. Admin files are handled above, never as ordinary public static pages.
 app.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: PROD ? '1h' : 0 }));
 
 if (require.main === module) {
