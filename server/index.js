@@ -792,8 +792,7 @@ app.post('/api/external-transfers', auth, requireVerified, moneyLimiter, wrap(as
       const t=now(),insert=await db.run("INSERT INTO external_transfer_requests (user_id,from_account_id,bank_name,account_name,account_number,amount,status,note,created_at,updated_at,hold_group_id) VALUES (?,?,?,?,?,?,'pending',?,?,?,?)",[req.user.id,from.id,bank,name,accountNumber,amount,note||null,t,t,movement.group_id]);
       return {id:insert.lastInsertRowid,balance:movement.balance};
     });
-    await notifyUser(req.user.id,'External transfer pending','Your request to '+bank+' is awaiting administrator processing. The amount is reserved; the transfer is not yet complete.','transfer');
-    return {ok:true,request_id:result.id,status:'pending',balance:result.balance};
+      return {ok:true,request_id:result.id,status:'pending',balance:result.balance};
   });
 }));
 
