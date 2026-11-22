@@ -594,7 +594,8 @@
       S.sheet=null; S.view='savings'; render(); toast('Savings goal saved'); return;
     }
     else if (kind === 'send-review') { api('GET','/api/accounts/lookup/'+encodeURIComponent(d.to_account)).then(function(rec){S.transferDraft={to_account:d.to_account,amount:d.amount,note:d.note,recipient:rec.name};S.sheet='send-confirm';render();}).catch(function(e){busy(form,false);setErr(form,e.message);});return; }
-    else if (kind === 'send-confirm') p = api('POST', '/api/transfers', { to_account: S.transferDraft.to_account, amount: S.transferDraft.amount, pin: d.pin, note: S.transferDraft.note }, S.idem);\n    else if (kind === 'external-transfer') { S.idem=uuid(); p = api('POST','/api/external-transfers',{bank_name:d.bank_name,account_name:d.account_name,account_number:d.account_number,amount:d.amount,pin:d.pin,note:d.note},S.idem); }
+    else if (kind === 'send-confirm') p = api('POST', '/api/transfers', { to_account: S.transferDraft.to_account, amount: S.transferDraft.amount, pin: d.pin, note: S.transferDraft.note }, S.idem);
+    else if (kind === 'external-transfer') { S.idem=uuid(); p = api('POST','/api/external-transfers',{bank_name:d.bank_name,account_name:d.account_name,account_number:d.account_number,amount:d.amount,pin:d.pin,note:d.note},S.idem); }
     else if (kind === 'bills') p = api('POST', '/api/bills', { biller: d.biller, reference: d.reference, amount: d.amount, pin: d.pin }, S.idem);
     else return;
     p.then(function (res) {
@@ -608,7 +609,8 @@
       if (kind === 'mfa-disable') return load().then(function(){S.sheet=null;S.view='security';render();toast('Multi-factor authentication disabled');});
       if (kind === 'forgot') { S.view='login';render();toast('If your account exists, recovery instructions were sent.');return; }
       if (kind === 'reset') { resetToken='';try{history.replaceState(null,'',location.pathname);}catch(_){} S.view='login';render();toast('Password updated. Sign in with your new password.');return; }
-      if (kind === 'external-transfer') return done('External transfer request submitted for administrator processing');\n      if (kind === 'support') return api('GET','/api/support/messages').then(function(d){S.support=d;render();toast('Message sent to support');});
+      if (kind === 'external-transfer') return done('External transfer request submitted for administrator processing');
+      if (kind === 'support') return api('GET','/api/support/messages').then(function(d){S.support=d;render();toast('Message sent to support');});
       if (kind === 'schedule') return load().then(function(){S.view='scheduled';render();toast('Transfer scheduled');});
       if (kind === 'dispute') return load().then(function(){S.view='disputes';render();toast('Dispute submitted');});
       if (kind === 'limits') return load().then(function(){S.view='limits';render();toast('Limits saved');});
