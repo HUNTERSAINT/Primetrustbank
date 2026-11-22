@@ -24,9 +24,11 @@ if (PROD && Buffer.byteLength(JWT_SECRET) < 32) {
   process.exit(1);
 }
 
-const KYC_ENCRYPTION_KEY = process.env.KYC_ENCRYPTION_KEY
+const LEGACY_KYC_KEY = crypto.createHash('sha256').update('prime-trust-kyc-v1:' + JWT_SECRET).digest();
+const HAS_KYC_ENCRYPTION_KEY = !!process.env.KYC_ENCRYPTION_KEY;
+const KYC_ENCRYPTION_KEY = HAS_KYC_ENCRYPTION_KEY
   ? (/^[a-f0-9]{64}$/i.test(process.env.KYC_ENCRYPTION_KEY) ? Buffer.from(process.env.KYC_ENCRYPTION_KEY, 'hex') : null)
-  : crypto.createHash('sha256').update('prime-trust-kyc-v1:' + JWT_SECRET).digest();
+  : LEGACY_KYC_KEY;
 if (!KYC_ENCRYPTION_KEY) {
   console.error('KYC_ENCRYPTION_KEY must be 64 hexadecimal characters');
   process.exit(1);
@@ -101,15 +103,17 @@ function sealKyc(value) {
   if (!value) return null;
   const iv = crypto.randomBytes(12), cipher = crypto.createCipheriv('aes-256-gcm', KYC_ENCRYPTION_KEY, iv);
   const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
-  return 'enc:v1:' + Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64');
+  return (HAS_KYC_ENCRYPTION_KEY ? 'enc:v2:' : 'enc:v1:') + Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64');
 }
 function unsealKyc(value) {
   if (!value) return null;
-  if (!value.startsWith('enc:v1:')) return value; // legacy records are encrypted when an admin first reviews them
+  if (!value.startsWith('enc:v1:') && !value.startsWith('enc:v2:')) return value; // legacy plaintext is encrypted when an admin first reviews it
+  const version = value.slice(0, 7);
   const packed = Buffer.from(value.slice(7), 'base64');
   if (packed.length < 29) throw httpErr(500, 'Stored identity document is corrupted.');
   const iv = packed.subarray(0, 12), tag = packed.subarray(12, 28), data = packed.subarray(28);
-  const decipher = crypto.createDecipheriv('aes-256-gcm', KYC_ENCRYPTION_KEY, iv);
+  const key = version === 'enc:v2:' ? KYC_ENCRYPTION_KEY : LEGACY_KYC_KEY;
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
 }
@@ -295,8 +299,11 @@ app.get('/api/admin/requests/:id', adminAuth, wrap((req,res)=>{
   const encrypted={};
   for(const [key,column] of [['front','id_front_data'],['back','id_back_data'],['selfie','selfie_data']]){
     const value=docs[key];
-    if(value&&!value.startsWith('enc:v1:')){encrypted[column]=sealKyc(value);docs[key]=value;}
-    else docs[key]=unsealKyc(value);
+    if(value&&!value.startsWith('enc:v1:')&&!value.startsWith('enc:v2:')){encrypted[column]=sealKyc(value);docs[key]=value;}
+    else {
+      docs[key]=unsealKyc(value);
+      if(value&&HAS_KYC_ENCRYPTION_KEY&&value.startsWith('enc:v1:')) encrypted[column]=sealKyc(docs[key]);
+    }
   }
   if(Object.keys(encrypted).length){const sets=Object.keys(encrypted).map(k=>k+'=?').join(',');db.prepare('UPDATE verification_requests SET '+sets+' WHERE id=?').run(...Object.values(encrypted),id);}
   auditAdmin(req,'KYC_DOCUMENTS_VIEWED',request.user_id,null,'Identity document images opened for review');
