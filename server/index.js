@@ -429,17 +429,14 @@ app.post('/api/admin/email/send', adminAuth, wrap((req,res)=>{
   if(!users.length) throw httpErr(400,'No eligible customer email addresses.');
   if(users.length>500) throw httpErr(400,'Audience exceeds 500 recipients; select a smaller batch.');
   const escapeHtml=s=>String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-  const safeMessage=escapeHtml(message).replace(/\r?
-/g,'<br>');
+  const safeMessage=escapeHtml(message).replace(/\r?\n/g,'<br>');
   const results=[]; let sent=0,failed=0;
   for(const user of users){
     try{
-      const response=fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({from,to:[user.email],subject,text:'Hello '+user.full_name+',
-
-'+message+'
-
-Prime Trust Bank',html:'<!doctype html><html><body style="font-family:Arial,sans-serif;color:#20162f"><h2>Prime Trust Bank</h2><p>Hello '+escapeHtml(user.full_name)+',</p><div style="line-height:1.7">'+safeMessage+'</div><p>Regards,<br>Prime Trust Bank Support</p></body></html>'})});
-      // synchronous endpoint keeps audit and response consistent; fetch is awaited below via async wrapper
+      const response=fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({from,to:[user.email],subject,text:'Hello '+user.full_name+',\n\n'+message+'\n\nPrime Trust Bank',html:'<!doctype html><html><body style=\"font-family:Arial,sans-serif;color:#20162f\"><h2>Prime Trust Bank</h2><p>Hello '+escapeHtml(user.full_name)+',</p><div style=\"line-height:1.7\">'+safeMessage+'</div><p>Regards,<br>Prime Trust Bank Support</p></body></html>'})});
+      results.push({user,response});
+    }catch(_){failed++;results.push({user,error:'Network error'});}
+  }
       results.push({user,response});
     }catch(_){failed++;results.push({user,error:'Network error'});}
   }
@@ -610,8 +607,7 @@ app.post('/api/transfers', auth, requireVerified, moneyLimiter, wrap((req, res) 
       WHERE a.account_number = ? AND a.kind = 'user'`).get(String(to_account));
     if (!dest) throw httpErr(404, 'No account with that number.');
     if (dest.id === req.account.id) throw httpErr(400, 'You cannot send money to yourself.');
-    const userNote = String(note || '').replace(/[|\r
-]/g, ' ').slice(0, 60);
+    const userNote = String(note || '').replace(/[|\r\n]/g, ' ').slice(0, 60);
     const out = db.transaction(() => move({
       from: req.account, to: dest, amount: amt,
       typeOut: 'transfer_out', typeIn: 'transfer_in',
