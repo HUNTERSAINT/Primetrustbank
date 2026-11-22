@@ -872,7 +872,7 @@ app.get('/api/admin/portal', adminAuth, (req, res) => {
   if (!ADMIN_PORTAL_PATH_VALID) return fail(res, 404, 'Not found.');
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.html'), 'utf8');
   const scriptPath = ADMIN_PORTAL_PATH + '.js';
-  const securedHtml = html.replace('src="/admin.js?v=admin-novacrest-copy-07"', 'src="' + scriptPath + '?v=secure-admin-01"');
+  const securedHtml = html.replace('src="/admin.js?v=admin-novacrest-copy-08"', 'src="' + scriptPath + '?v=secure-admin-02"');
   res.set('Cache-Control', 'no-store, private');
   res.type('html').send(securedHtml);
 });
