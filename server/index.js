@@ -391,7 +391,8 @@ app.get('/api/admin/external-transfers',adminAuth,wrap(async(req,res)=>{
   if(!['active','all','pending','processing','completed','rejected'].includes(status))throw httpErr(400,'Invalid external transfer status.');
   const where=status==='active'?"WHERE et.status IN ('pending','processing')":status==='all'?'':"WHERE et.status=?";
   const args=status==='active'||status==='all'?[]:[status];
-  const transfers=await db.all("SELECT et.id,et.user_id,et.bank_name,et.account_name,et.account_number,et.amount,et.status,et.note,et.created_at,et.updated_at,et.reviewed_by,et.review_note,et.transfer_reference,u.full_name,u.email,a.account_number customer_account FROM external_transfer_requests et JOIN users u ON u.id=et.user_id JOIN accounts a ON a.user_id=et.user_id AND a.kind='user' "+where+" ORDER BY CASE et.status WHEN 'pending' THEN 0 WHEN 'processing' THEN 1 ELSE 2 END,et.created_at ASC LIMIT 250",args);
+  const rawTransfers=await db.all("SELECT et.id,et.user_id,et.bank_name,et.account_name,et.account_number,et.amount,et.status,et.note,et.created_at,et.updated_at,et.reviewed_by,et.review_note,et.transfer_reference,u.full_name,u.email,a.account_number customer_account FROM external_transfer_requests et JOIN users u ON u.id=et.user_id JOIN accounts a ON a.user_id=et.user_id AND a.kind='user' "+where+" ORDER BY CASE et.status WHEN 'pending' THEN 0 WHEN 'processing' THEN 1 ELSE 2 END,et.created_at ASC LIMIT 250",args);
+  const transfers=rawTransfers.map(t=>{let details={};const prefix='ptb-transfer-v2:';if(String(t.note||'').startsWith(prefix)){try{details=JSON.parse(unsealKyc(t.note.slice(prefix.length))||'{}');}catch{}}return {...t,...details,note:details.memo||''};});
   const pending=(await db.get("SELECT COUNT(*) n FROM external_transfer_requests WHERE status='pending'",[])).n;
   res.json({transfers,pending});
 }));
@@ -771,31 +772,36 @@ app.post('/api/transfers', auth, requireVerified, moneyLimiter, wrap(async (req,
 }));
 
 app.get('/api/external-transfers', auth, wrap(async (req,res)=>{
-  const transfers=await db.all("SELECT id,bank_name,account_name,account_number,amount,status,note,created_at,updated_at,transfer_reference,review_note FROM external_transfer_requests WHERE user_id=? ORDER BY id DESC LIMIT 100", [req.user.id]);
+  const rows=await db.all("SELECT id,bank_name,account_name,account_number,amount,status,note,created_at,updated_at,transfer_reference,review_note FROM external_transfer_requests WHERE user_id=? ORDER BY id DESC LIMIT 100", [req.user.id]);
+  const transfers=rows.map(t=>{let details={};const prefix='ptb-transfer-v2:';if(String(t.note||'').startsWith(prefix)){try{details=JSON.parse(unsealKyc(t.note.slice(prefix.length))||'{}');}catch{}}return {...t,account_number:'••••'+String(details.account_number||t.account_number||'').slice(-4),note:details.memo||''};});
   res.json({transfers});
 }));
 app.post('/api/external-transfers', auth, requireVerified, moneyLimiter, wrap(async (req,res)=>{
   await idempotent(req,res,async()=>{
-    const body=req.body||{},bank=String(body.bank_name||'').trim().slice(0,100),name=String(body.account_name||'').trim().slice(0,100),accountNumber=String(body.account_number||'').trim(),note=String(body.note||'').replace(/[|\r\n]/g,' ').slice(0,100);
-    const amount=cents(body.amount);
-    if(bank.length<2||name.length<2||!/^[0-9]{6,34}$/.test(accountNumber))throw httpErr(400,'Enter a valid destination bank, account name and account number.');
+    const b=req.body||{},method=String(b.transfer_type||'').toLowerCase(),bank=String(b.bank_name||'').trim().slice(0,100),name=String(b.account_name||'').trim().slice(0,100),acct=String(b.account_number||'').trim(),routing=String(b.routing_number||'').trim(),acctType=String(b.account_type||'').toLowerCase(),memo=String(b.note||'').replace(/[|\\r\\n]/g,' ').slice(0,100);
+    const street=String(b.recipient_street||'').trim().slice(0,120),city=String(b.recipient_city||'').trim().slice(0,60),state=String(b.recipient_state||'').trim().toUpperCase().slice(0,2),zip=String(b.recipient_postal_code||'').trim().slice(0,10),country=String(b.recipient_country||'').trim(),phone=String(b.recipient_phone||'').trim().slice(0,25),bankAddress=String(b.bank_address||'').trim().slice(0,200);
+    const amount=cents(b.amount);
+    const aba=(routing.length===9&&/^[0-9]{9}$/.test(routing))?(Number(routing[0])+Number(routing[3])+Number(routing[6]))*3+(Number(routing[1])+Number(routing[4])+Number(routing[7]))*7+(Number(routing[2])+Number(routing[5])+Number(routing[8]))):1;
+    if(!['ach','wire'].includes(method)||bank.length<2||name.length<2||!/^[0-9]{4,17}$/.test(acct)||!['checking','savings'].includes(acctType)||aba%10!==0)throw httpErr(400,'Enter a valid transfer method, bank, beneficiary, account type, account number and ABA routing number.');
+    if(street.length<3||city.length<2||!/^[A-Z]{2}$/.test(state)||!/^\\d{5}(-\\d{4})?$/.test(zip)||country!=='United States')throw httpErr(400,'Enter the recipient’s complete U.S. street address, city, 2-letter state, ZIP code and country.');
+    if(phone&&!/^\\+?[0-9(). -]{7,25}$/.test(phone))throw httpErr(400,'Enter a valid recipient phone number or leave it blank.');
     if(!amount||amount>1000000*100)throw httpErr(400,'Enter a valid transfer amount.');
-    const userLimit=await db.get('SELECT daily_transfer_limit FROM account_limits WHERE user_id=?',[req.user.id]),tier=kyc.tierOf(req.user);
+    const limits=await db.get('SELECT daily_transfer_limit FROM account_limits WHERE user_id=?',[req.user.id]),tier=kyc.tierOf(req.user);
     if(amount>tier.per_transaction)throw httpErr(422,'This amount is above the limit for your verification level ('+tier.name+').');
-    const dailyLimit=Math.min(userLimit?userLimit.daily_transfer_limit:500000,tier.daily_transfer);
-    if(amount>dailyLimit||(await transferDailyTotal(req.user.id))+amount>dailyLimit)throw httpErr(422,'Your daily transfer limit would be exceeded.');
-    await verifyPin(req.user,body.pin);
+    const daily=Math.min(limits?limits.daily_transfer_limit:500000,tier.daily_transfer);
+    if(amount>daily||(await transferDailyTotal(req.user.id))+amount>daily)throw httpErr(422,'Your daily transfer limit would be exceeded.');
+    await verifyPin(req.user,b.pin);
+    const encrypted='ptb-transfer-v2:'+sealKyc(JSON.stringify({transfer_type:method,routing_number:routing,account_number:acct,account_type:acctType,recipient_address:{street,city,state,postal_code:zip,country},recipient_phone:phone,bank_address:bankAddress,memo}));
     const result=await db.tx(async()=>{
       const from=await getUserAccount(req.user.id),hold=await db.get("SELECT * FROM accounts WHERE account_number='SYS-EXTERNAL-TRANSFERS' AND kind='system'");
       if(!from||!hold)throw httpErr(500,'External transfer processing account is unavailable.');
-      const movement=await move({from,to:hold,amount,typeOut:'external_transfer_pending',typeIn:'external_transfer_hold',counterOut:bank+' · '+name,counterIn:'External transfer funds held',note:'External transfer to '+bank+' · '+accountNumber+(note?' | '+note:'')});
-      const t=now(),insert=await db.run("INSERT INTO external_transfer_requests (user_id,from_account_id,bank_name,account_name,account_number,amount,status,note,created_at,updated_at,hold_group_id) VALUES (?,?,?,?,?,?,'pending',?,?,?,?)",[req.user.id,from.id,bank,name,accountNumber,amount,note||null,t,t,movement.group_id]);
+      const movement=await move({from,to:hold,amount,typeOut:'external_transfer_pending',typeIn:'external_transfer_hold',counterOut:bank+' · '+name,counterIn:'External transfer funds held',note:'External transfer '+method.toUpperCase()+' to '+bank+' · account ending '+acct.slice(-4)+(memo?' | '+memo:'')});
+      const t=now(),insert=await db.run("INSERT INTO external_transfer_requests (user_id,from_account_id,bank_name,account_name,account_number,amount,status,note,created_at,updated_at,hold_group_id) VALUES (?,?,?,?,?,?,'pending',?,?,?,?)",[req.user.id,from.id,bank,name,'••••'+acct.slice(-4),amount,encrypted,t,t,movement.group_id]);
       return {id:insert.lastInsertRowid,balance:movement.balance};
     });
-      return {ok:true,request_id:result.id,status:'pending',balance:result.balance};
+    return {ok:true,request_id:result.id,status:'pending',balance:result.balance};
   });
 }));
-
 const BILLERS = ['Electricity', 'Cable TV', 'Internet', 'Water', 'School fees'];
 const NETWORKS = ['MTN', 'Airtel', 'Glo', '9mobile'];
 
