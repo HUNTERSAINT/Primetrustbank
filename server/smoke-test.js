@@ -1,6 +1,7 @@
 // End-to-end API check on a throwaway database. Run: npm test
 process.env.DB_PATH = require('path').join(require('os').tmpdir(), 'ptb-test-' + Date.now() + '.db');
 process.env.NODE_ENV = 'test';
+process.env.ALLOW_SANDBOX_FUNDING = 'true'; // isolated test database only
 process.env.ADMIN_EMAIL = 'admin@primetrust.test';
 process.env.ADMIN_PASSWORD = 'test-admin-password';
 const assert = require('assert');
