@@ -100,21 +100,51 @@
   }
   function compressIdFile(file) {
     if (!file) return Promise.resolve('');
-    if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size > 12000000) return Promise.reject(new Error('Choose a JPG, PNG or WebP image under 12 MB.'));
+    var type = String(file.type || '').toLowerCase();
+    var name = String(file.name || '').toLowerCase();
+    var supported = /^image\/(jpeg|png|webp)$/.test(type) || /\.(jpe?g|png|webp)$/.test(name);
+    if (!supported || file.size > 12000000) return Promise.reject(new Error('Choose a JPG, PNG or WebP image under 12 MB.'));
     return new Promise(function(resolve,reject){
-      var url=URL.createObjectURL(file),img=new Image();
-      img.onload=function(){
+      var url;
+      var settled = false;
+      function fail(){
+        if(settled)return;settled=true;
+        if(url)URL.revokeObjectURL(url);
+        reject(new Error('This photo could not be decoded on your phone. Open it in Gallery, save/export it as a JPG, then select the saved copy.'));
+      }
+      function compress(source,width,height){
+        if(settled)return;
         try{
-          var scale=Math.min(1,1100/Math.max(img.width,img.height)),canvas=document.createElement('canvas');
-          canvas.width=Math.max(1,Math.round(img.width*scale));canvas.height=Math.max(1,Math.round(img.height*scale));
-          canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
-          var data=canvas.toDataURL('image/jpeg',0.72);URL.revokeObjectURL(url);
-          if(data.length>1450000)reject(new Error('Image is too large after compression. Choose a smaller photo.'));
-          else resolve(data);
-        }catch(e){URL.revokeObjectURL(url);reject(e);}
-      };
-      img.onerror=function(){URL.revokeObjectURL(url);reject(new Error('Could not read the selected image.'));};
-      img.src=url;
+          if(!width||!height)throw new Error('Invalid image dimensions');
+          var scale=Math.min(1,1100/Math.max(width,height)),canvas=document.createElement('canvas');
+          canvas.width=Math.max(1,Math.round(width*scale));canvas.height=Math.max(1,Math.round(height*scale));
+          var ctx=canvas.getContext('2d');
+          if(!ctx)throw new Error('Canvas unavailable');
+          ctx.drawImage(source,0,0,canvas.width,canvas.height);
+          var data=canvas.toDataURL('image/jpeg',0.72);
+          if(url)URL.revokeObjectURL(url);
+          if(data.length>1450000)throw new Error('Image is too large after compression. Choose a smaller photo.');
+          settled=true;resolve(data);
+        }catch(e){
+          if(url)URL.revokeObjectURL(url);
+          if(settled)return;settled=true;reject(e&&e.message?e:new Error('Image compression failed.'));
+        }
+      }
+      function bitmapFallback(){
+        if(typeof createImageBitmap==='function'){
+          createImageBitmap(file).then(function(bitmap){
+            compress(bitmap,bitmap.width,bitmap.height);
+            if(bitmap.close)bitmap.close();
+          }).catch(fail);
+        }else fail();
+      }
+      try{
+        url=URL.createObjectURL(file);
+        var img=new Image();
+        img.onload=function(){compress(img,img.naturalWidth||img.width,img.naturalHeight||img.height);};
+        img.onerror=bitmapFallback;
+        img.src=url;
+      }catch(e){bitmapFallback();}
     });
   }
   function vVerification() {
