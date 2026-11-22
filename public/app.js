@@ -347,7 +347,7 @@
     if (a === 'closebg') { if (ev.target === t) { S.sheet = null; render(); } return; }
     if (a === 'go') return go(t.dataset.v);
     if (a === 'refresh-support') return go('support');
-    if (a === 'return-admin') { if(!confirm('End this customer session and return to the admin console?'))return; api('POST','/api/admin/impersonate-return',{}).then(function(){window.location.href='/admin.html';}).catch(function(e){toast(e.message);}); return; }
+    if (a === 'return-admin') { if(!confirm('End this customer session and return to the admin console?'))return; api('POST','/api/admin/impersonate-return',{}).then(function(){window.location.href='/api/admin/portal';}).catch(function(e){toast(e.message);}); return; }
     if (a === 'sheet') return openSheet(t.dataset.s);
     if (a === 'goal') return openSheet('goal');
     if (a === 'clear-goal') { S.goal=null; try{localStorage.removeItem('ptb_goal');}catch(_){} S.sheet=null; S.view='savings'; return render(); }
