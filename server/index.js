@@ -83,10 +83,13 @@ function newAccountNumber() {
 }
 function cardNumber() { return String(crypto.randomInt(1000, 9999)); }
 
-function issueSession(res, userId) {
+function issueSession(res, userId, req) {
   const row = db.prepare('SELECT session_version FROM users WHERE id = ?').get(userId);
   if (!row) throw httpErr(404, 'Customer account not found.');
-  const token = jwt.sign({ uid: userId, sv: row.session_version || 0 }, JWT_SECRET, { expiresIn: SESSION_HOURS + 'h' });
+  const jti=crypto.randomUUID(),created=now(),expires=created+SESSION_HOURS*3600*1000;
+  db.prepare('INSERT INTO user_sessions (jti,user_id,user_agent,created_at,last_seen_at,expires_at) VALUES (?,?,?,?,?,?)')
+    .run(jti,userId,String(req&&req.get('user-agent')||'').slice(0,300),created,created,expires);
+  const token = jwt.sign({ uid: userId, sv: row.session_version || 0, jti }, JWT_SECRET, { expiresIn: SESSION_HOURS + 'h' });
   res.cookie('ptb_session', token, {
     httpOnly: true, sameSite: 'strict', secure: PROD, maxAge: SESSION_HOURS * 3600 * 1000, path: '/'
   });
@@ -133,9 +136,16 @@ function requireVerified(req, res, next) {
 
 function auth(req, res, next) {
   try {
-    const { uid, sv } = jwt.verify(req.cookies.ptb_session || '', JWT_SECRET);
+    const payload = jwt.verify(req.cookies.ptb_session || '', JWT_SECRET);
+    const { uid, sv, jti } = payload;
     const user = db.prepare('SELECT * FROM users WHERE id = ?').get(uid);
     if (!user || Number(sv || 0) !== Number(user.session_version || 0)) throw new Error('session revoked');
+    if(jti){
+      const session=db.prepare('SELECT user_id,expires_at,revoked_at,last_seen_at FROM user_sessions WHERE jti=?').get(jti);
+      if(!session||session.user_id!==uid||session.revoked_at||session.expires_at<=now())throw new Error('session revoked');
+      if(session.last_seen_at<now()-300000)db.prepare('UPDATE user_sessions SET last_seen_at=? WHERE jti=?').run(now(),jti);
+      req.sessionJti=jti;
+    }
     if (user.status === 'suspended') return fail(res, 403, 'This account is suspended. Please contact Prime Trust support.');
     req.user = user;
     req.account = db.prepare("SELECT * FROM accounts WHERE user_id = ? AND kind = 'user'").get(uid);
@@ -263,7 +273,7 @@ app.post('/api/admin/impersonate/:id', adminAuth, wrap((req,res)=>{
   if (user.email.toLowerCase() === configuredAdminEmail) throw httpErr(400, 'You cannot sign in as an administrator.');
   if (user.status === 'suspended') throw httpErr(403, 'Reactivate this customer before viewing their account.');
 
-  issueSession(res, id);
+  issueSession(res, id, req);
   const marker = jwt.sign({
     impersonating: true,
     adminEmail: req.admin.email,
@@ -284,6 +294,7 @@ app.post('/api/admin/impersonate-return', adminAuth, wrap((req,res)=>{
     throw httpErr(403, 'This administrator session cannot return from the current customer view.');
   }
   auditAdmin(req, 'RETURN_FROM_USER_SESSION', Number(marker.targetId), null, 'Admin returned from customer session');
+  try{const customer=jwt.verify(req.cookies.ptb_session||'',JWT_SECRET);if(customer.jti)db.prepare('UPDATE user_sessions SET revoked_at=? WHERE jti=? AND revoked_at IS NULL').run(now(),customer.jti);}catch{}
   res.clearCookie('ptb_session', { path: '/' });
   res.clearCookie('ptb_impersonation', { path: '/' });
   res.json({ ok: true });
@@ -592,12 +603,12 @@ app.post('/api/auth/login', authLimiter, wrap((req, res) => {
   if (user.status === 'suspended') throw httpErr(403, 'This account is suspended. Please contact Prime Trust support.');
   db.prepare('UPDATE users SET failed_logins = 0, locked_until = 0 WHERE id = ?').run(user.id);
   if (bcrypt.getRounds(user.password_hash) < 12) db.prepare('UPDATE users SET password_hash=? WHERE id=?').run(bcrypt.hashSync(password,12),user.id);
-  issueSession(res, user.id);
+  issueSession(res, user.id, req);
   res.json({ ok: true });
 }));
 
 app.post('/api/auth/logout', (req, res) => {
-  try { const payload=jwt.verify(req.cookies.ptb_session||'',JWT_SECRET); if(payload.uid) db.prepare('UPDATE users SET session_version=session_version+1 WHERE id=?').run(payload.uid); } catch {}
+  try { const payload=jwt.verify(req.cookies.ptb_session||'',JWT_SECRET); if(payload.jti)db.prepare('UPDATE user_sessions SET revoked_at=? WHERE jti=? AND revoked_at IS NULL').run(now(),payload.jti); } catch {}
   res.clearCookie('ptb_session', { path: '/' }); res.clearCookie('ptb_impersonation',{path:'/'}); res.json({ ok: true });
 });
 
@@ -767,6 +778,22 @@ app.get('/api/admin/portal', adminAuth, (req, res) => {
 });
 
 
+/* ---------- device/session management ---------- */
+app.get('/api/security/sessions',auth,wrap((req,res)=>{
+  const sessions=db.prepare('SELECT jti,user_agent,created_at,last_seen_at,expires_at,revoked_at FROM user_sessions WHERE user_id=? ORDER BY created_at DESC LIMIT 50').all(req.user.id)
+    .map(s=>({id:s.jti,device:s.user_agent||'Unknown device',created_at:s.created_at,last_seen_at:s.last_seen_at,expires_at:s.expires_at,revoked:!!s.revoked_at,current:s.jti===req.sessionJti}));
+  res.json({sessions});
+}));
+app.post('/api/security/sessions/:id/revoke',auth,sensitiveWriteLimiter,wrap((req,res)=>{
+  const id=String(req.params.id||'');if(!/^[0-9a-f-]{36}$/i.test(id))throw httpErr(400,'Invalid session.');
+  const result=db.prepare('UPDATE user_sessions SET revoked_at=? WHERE jti=? AND user_id=? AND revoked_at IS NULL').run(now(),id,req.user.id);
+  if(!result.changes)throw httpErr(404,'Session not found or already revoked.');
+  res.json({ok:true,current:id===req.sessionJti});
+}));
+app.post('/api/security/sessions/revoke-others',auth,sensitiveWriteLimiter,wrap((req,res)=>{
+  db.prepare('UPDATE user_sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL AND jti<>?').run(now(),req.user.id,req.sessionJti||'');
+  res.json({ok:true});
+}));
 /* ---------- customer controls and service features ---------- */
 function notifyUser(userId,title,message,category='account'){
   if(!userId)return;
