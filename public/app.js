@@ -91,7 +91,7 @@
       state === 'rejected' ? 'Your verification was not approved. Please review your details and submit them again.' :
       state === 'submitted' ? 'Your details have been sent to our verification team. We will enable banking once an administrator approves your identity.' :
       'Complete this short form. A Prime Trust administrator will review your identity before you can use banking features.';
-    return '<section class="screen">' + status +
+    return '<section class="screen">' + 
       '<div class="brand">Prime Trust</div><div class="panel" style="margin-top:18px">' +
       '<div class="ti" style="width:52px;height:52px;border-radius:16px;margin-bottom:16px">' + ic(state === 'approved' ? 'detail' : 'user') + '</div>' +
       '<h2>' + esc(heading) + '</h2><p class="lead">' + esc(copy) + '</p>' +
@@ -112,44 +112,28 @@
     var b = function (v, icon, label) {
       return '<button data-act="go" data-v="' + v + '" aria-label="' + label + '"' + (cur === v ? ' aria-current="page"' : '') + '>' + ic(icon) + (cur === v ? label : '') + '</button>';
     };
-    return '<nav class="dock" aria-label="Main">' + b('home', 'home', 'Home') + b('history', 'swap', 'Activity') + b('card', 'detail', 'Card') +
-      '<button data-act="sheet" data-s="profile" aria-label="Profile">' + ic('user') + '</button></nav>';
+    return '<nav class="dock" aria-label="Main">' + b('home','home','Home') + b('accounts','detail','Accounts') + b('history','swap','Activity') + b('card','detail','Cards') + b('security','user','Profile') + '</nav>';
   }
   function vHome() {
-    var me = S.me, first = me.name.split(' ')[0];
-    var benes = S.benes.length ? S.benes.map(function (b) {
-      return '<button class="bn" data-act="pick" data-acct="' + esc(b.account_number) + '">' + avatar(b.name) + '<span class="nm">' + esc(b.name.split(' ')[0]) + '</span></button>';
-    }).join('') : '<p class="empty">People you send money to will show up here.</p>';
-    var trs = S.txs.slice(0, 4).map(txRow).join('') || '<p class="empty">No transactions yet. Add funds to get started.</p>';
-    return '<section class="screen">' + status +
-      '<div class="panel" style="margin-top:12px"><div class="hrow">' + avatar(me.name) +
-      '<div><b>Hey, ' + esc(first) + '</b><small>Welcome back!</small></div><div class="sp"></div>' +
-      '<button class="circ" data-act="toast" data-m="Support is available 24/7 in the full app" aria-label="Support">' + ic('headset') + '</button>' +
-      '<button class="circ" data-act="toast" data-m="No new notifications" aria-label="Notifications">' + ic('bell') + '</button></div>' +
-      '<div class="stdcard"><span class="mc"></span><span><b>Acct ' + esc(me.account.number) + '</b></span>' +
-      '<button class="copy" data-act="copy" aria-label="Copy account number">' + ic('copy') + 'Copy</button></div>' +
-      '<div class="balrow"><div><div class="lab">Your balance <button data-act="eye" aria-label="' + (S.hidden ? 'Show' : 'Hide') + ' balance">' + ic(S.hidden ? 'eyeoff' : 'eye', 'font-size:14px') + '</button></div>' +
-      '<div class="big">' + (S.hidden ? 'USD ••••••' : 'USD ' + money(me.account.balance)) + '</div></div>' +
-      '<button class="addf" data-act="addfunds">' + ic('plus', 'font-size:12px') + 'Add Funds</button></div></div>' +
-      '<div class="panel" style="margin-top:12px;padding:12px 6px"><div class="acts">' +
-      '<button class="act" data-act="sheet" data-s="send"><i>' + ic('up') + '</i>Send</button>' +
-      '<button class="act" data-act="toast" data-m="Cash withdrawal is not available yet"><i>' + ic('down') + '</i>Withdraw</button>' +
-      '<button class="act" data-act="sheet" data-s="airtime"><i>' + ic('phone') + '</i>Buy Airtime</button>' +
-      '<button class="act" data-act="sheet" data-s="bills"><i>' + ic('bill') + '</i>Pay Bills</button></div></div>' +
-      '<div class="sub">Quick access</div><div class="panel page-links">' + pageLink('transfers','up','Transfers','Send money and recipients') + pageLink('payments','bill','Payments','Airtime and bills') + pageLink('accounts','detail','Accounts','Account details and statements') + pageLink('savings','plus','Savings goals','Track a personal target') + pageLink('security','user','Profile & security','Account settings') + '</div>' +
-      '<div class="sub">Recent beneficiaries</div><div class="benes">' + benes + '</div>'
-      '<div class="trh"><b>Transactions</b><button data-act="go" data-v="history">View all</button></div>' + trs +
-      '</section>' + dock('home');
+    var me=S.me, first=me.name.split(' ')[0];
+    var benes=S.benes.length?S.benes.map(function(b){return '<button class="bn" data-act="pick" data-acct="'+esc(b.account_number)+'">'+avatar(b.name)+'<span class="nm">'+esc(b.name.split(' ')[0])+'</span></button>';}).join(''):'<p class="empty">Your saved recipients appear here after your first transfer.</p>';
+    var trs=S.txs.slice(0,4).map(txRow).join('')||'<p class="empty">No transactions yet. Add funds to get started.</p>';
+    return '<section class="screen"><div class="panel" style="margin-top:12px"><div class="hrow">'+avatar(me.name)+'<div><b>Hey, '+esc(first)+'</b><small>Welcome back to Prime Trust</small></div><div class="sp"></div><button class="circ" data-act="toast" data-m="Contact support through your bank support channel" aria-label="Support">'+ic('headset')+'</button><button class="circ" data-act="toast" data-m="No new notifications" aria-label="Notifications">'+ic('bell')+'</button></div>'+
+      '<div class="stdcard"><span class="mc"></span><span><b>Acct '+esc(me.account.number)+'</b></span><button class="copy" data-act="copy" aria-label="Copy account number">'+ic('copy')+'Copy</button></div>'+
+      '<div class="balrow"><div><div class="lab">Available balance <button data-act="eye" aria-label="'+(S.hidden?'Show':'Hide')+' balance">'+ic(S.hidden?'eyeoff':'eye','font-size:14px')+'</button></div><div class="big">'+(S.hidden?'USD ••••••':'USD '+money(me.account.balance))+'</div></div><button class="addf" data-act="addfunds">'+ic('plus','font-size:12px')+'Add funds</button></div></div>'+
+      '<div class="panel" style="margin-top:12px;padding:12px 6px"><div class="acts"><button class="act" data-act="go" data-v="transfers"><i>'+ic('up')+'</i>Transfer</button><button class="act" data-act="go" data-v="payments"><i>'+ic('bill')+'</i>Payments</button><button class="act" data-act="go" data-v="card"><i>'+ic('detail')+'</i>Cards</button><button class="act" data-act="go" data-v="accounts"><i>'+ic('detail')+'</i>Accounts</button></div></div>'+
+      '<div class="sub">Banking services</div><div class="panel page-links">'+pageLink('transfers','up','Transfers','Send money and manage recipients')+pageLink('payments','bill','Payments','Airtime and bills')+pageLink('accounts','detail','Accounts','Account details and balance')+pageLink('history','swap','Statements & activity','Search and export transactions')+pageLink('savings','plus','Savings goals','Track a personal target')+pageLink('security','user','Profile & security','Manage your account')+'</div>'+
+      '<div class="sub">Recent recipients</div><div class="benes">'+benes+'</div><div class="trh"><b>Recent activity</b><button data-act="go" data-v="history">View all</button></div>'+trs+'</section>'+dock('home');
   }
   function vHistory() {
     var trs = S.txs.map(txRow).join('') || '<p class="empty">No transactions yet.</p>';
-    return '<section class="screen">' + status +
+    return '<section class="screen">' + 
       '<div class="hd"><button class="circ" data-act="go" data-v="home" aria-label="Back">' + ic('back') + '</button><h4>Activity</h4><button class="copy" data-act="statement">Export</button></div><label class="field" style="margin:8px 0 14px">Search transactions<input data-search type="search" placeholder="Search activity"></label>' + trs + '</section>' + dock('history');
   }
   function vCard() {
     var me = S.me, c = me.card;
     var outs = S.txs.filter(function (t) { return t.amount < 0; }).slice(0, 3).map(txRow).join('') || '<p class="empty">No card activity yet.</p>';
-    return '<section class="screen">' + status +
+    return '<section class="screen">' + 
       '<div class="hd"><button class="circ" data-act="go" data-v="home" aria-label="Back">' + ic('back') + '</button><h4>Manage card</h4><span></span></div>' +
       '<div class="panel cardbal"><div><small>US Dollar</small><b>' + money(me.account.balance) + '</b></div>' +
       '<button class="addf" data-act="addfunds">' + ic('plus', 'font-size:12px') + 'Add money</button></div>' +
@@ -283,7 +267,12 @@
       case 'login': html = vAuth('login'); break;
       case 'register': html = vAuth('register'); break;
       case 'verification': html = vVerification(); break;
-      case 'home': html = vHome(); break;\n      case 'accounts': html = vAccounts(); break;\n      case 'transfers': html = vTransfers(); break;\n      case 'payments': html = vPayments(); break;\n      case 'savings': html = vSavings(); break;\n      case 'security': html = vSecurity(); break;
+      case 'home': html = vHome(); break;
+      case 'accounts': html = vAccounts(); break;
+      case 'transfers': html = vTransfers(); break;
+      case 'payments': html = vPayments(); break;
+      case 'savings': html = vSavings(); break;
+      case 'security': html = vSecurity(); break;
       case 'history': html = vHistory(); break;
       case 'card': html = vCard(); break;
       default: html = vWelcome();
@@ -317,7 +306,9 @@
     var a = t.dataset.act;
     if (a === 'closebg') { if (ev.target === t) { S.sheet = null; render(); } return; }
     if (a === 'go') return go(t.dataset.v);
-    if (a === 'sheet') return openSheet(t.dataset.s);\n    if (a === 'goal') return openSheet('goal');\n    if (a === 'clear-goal') { S.goal=null; try{localStorage.removeItem('ptb_goal');}catch(_){} S.sheet=null; S.view='savings'; return render(); }
+    if (a === 'sheet') return openSheet(t.dataset.s);
+    if (a === 'goal') return openSheet('goal');
+    if (a === 'clear-goal') { S.goal=null; try{localStorage.removeItem('ptb_goal');}catch(_){} S.sheet=null; S.view='savings'; return render(); }
     if (a === 'close') { S.sheet = null; return render(); }
     if (a === 'toast') return toast(t.dataset.m);
     if (a === 'eye') { S.hidden = !S.hidden; return render(); }
