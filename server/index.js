@@ -607,6 +607,38 @@ app.post('/api/auth/login', authLimiter, wrap((req, res) => {
   res.json({ ok: true });
 }));
 
+app.post('/api/auth/password-reset/request',authLimiter,wrap(async (req,res)=>{
+  const email=String((req.body||{}).email||'').trim().toLowerCase();
+  if(!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)||email.length>120)throw httpErr(400,'Enter a valid email address.');
+  const apiKey=process.env.RESEND_API_KEY,from=process.env.RESEND_FROM_EMAIL||process.env.EMAIL_FROM;
+  if(!apiKey||!from)throw httpErr(503,'Password recovery email is not configured.');
+  const user=db.prepare('SELECT id,full_name,email FROM users WHERE email=?').get(email);
+  if(user){
+    const raw=crypto.randomBytes(32).toString('base64url'),hash=crypto.createHash('sha256').update(raw).digest('hex'),created=now(),expires=created+30*60*1000;
+    db.prepare('UPDATE password_reset_tokens SET used_at=? WHERE user_id=? AND used_at IS NULL').run(created,user.id);
+    db.prepare('INSERT INTO password_reset_tokens (user_id,token_hash,expires_at,created_at) VALUES (?,?,?,?)').run(user.id,hash,expires,created);
+    const base=String(process.env.PUBLIC_APP_URL||req.protocol+'://'+req.get('host')).replace(/\\/$/,'');
+    const link=base+'/?reset='+encodeURIComponent(raw);
+    const safeName=String(user.full_name).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({from,to:[user.email],subject:'Reset your Prime Trust password',text:'Hello '+user.full_name+',\\n\\nUse this link to reset your password within 30 minutes: '+link+'\\n\\nIf you did not request this, ignore this email.',html:'<p>Hello '+safeName+',</p><p>Use this link to reset your Prime Trust password. It expires in 30 minutes.</p><p><a href="'+link+'">Reset password</a></p><p>If you did not request this, ignore this email.</p>'})});
+    if(!response.ok){db.prepare('UPDATE password_reset_tokens SET used_at=? WHERE token_hash=?').run(now(),hash);throw httpErr(502,'Could not send password recovery email. Try again later.');}
+  }
+  res.json({ok:true,message:'If the account exists, password recovery instructions have been sent.'});
+}));
+app.post('/api/auth/password-reset/confirm',authLimiter,wrap((req,res)=>{
+  const b=req.body||{},raw=String(b.token||''),password=b.password;
+  if(!/^[A-Za-z0-9_-]{40,60}$/.test(raw))throw httpErr(400,'Reset link is invalid or expired.');
+  if(typeof password!=='string'||password.length<12||Buffer.byteLength(password,'utf8')>72)throw httpErr(400,'Password must be at least 12 characters and no more than 72 UTF-8 bytes.');
+  const hash=crypto.createHash('sha256').update(raw).digest('hex'),record=db.prepare('SELECT * FROM password_reset_tokens WHERE token_hash=?').get(hash);
+  if(!record||record.used_at||record.expires_at<=now())throw httpErr(400,'Reset link is invalid or expired.');
+  const ph=bcrypt.hashSync(password,12),t=now();
+  db.transaction(()=>{
+    db.prepare('UPDATE users SET password_hash=?,session_version=session_version+1,failed_logins=0,locked_until=0 WHERE id=?').run(ph,record.user_id);
+    db.prepare('UPDATE password_reset_tokens SET used_at=? WHERE id=?').run(t,record.id);
+    db.prepare('UPDATE user_sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL').run(t,record.user_id);
+  })();
+  res.json({ok:true});
+}));
 app.post('/api/auth/logout', (req, res) => {
   try { const payload=jwt.verify(req.cookies.ptb_session||'',JWT_SECRET); if(payload.jti)db.prepare('UPDATE user_sessions SET revoked_at=? WHERE jti=? AND revoked_at IS NULL').run(now(),payload.jti); } catch {}
   res.clearCookie('ptb_session', { path: '/' }); res.clearCookie('ptb_impersonation',{path:'/'}); res.json({ ok: true });
