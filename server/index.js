@@ -201,7 +201,7 @@ app.post('/api/admin/impersonate/:id', adminAuth, wrap((req,res)=>{
   auditAdmin(req,'LOGIN_AS_USER',id,null,'Admin opened customer session: '+user.email);
   res.json({ok:true,user:{id:user.id,email:user.email,full_name:user.full_name}});
 }));
-app.post('/api/admin/impersonate/return', adminAuth, wrap((req,res)=>{
+app.post('/api/admin/impersonate-return', adminAuth, wrap((req,res)=>{
   const marker=(()=>{try{return jwt.verify(req.cookies.ptb_impersonation||'',JWT_SECRET);}catch{return null;}})();
   if(marker&&marker.impersonating) auditAdmin(req,'RETURN_FROM_USER_SESSION',Number(marker.targetId),null,'Admin returned from customer session');
   res.clearCookie('ptb_session',{path:'/'});
