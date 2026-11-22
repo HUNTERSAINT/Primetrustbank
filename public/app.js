@@ -519,6 +519,8 @@
 
   app.addEventListener('input', function (ev) {
     if (ev.target.name === 'to_account') lookup(ev.target.value.trim());
+  });
+  app.addEventListener('change', function (ev) {
     if (ev.target.matches('[data-statement-from]')) { S.statementFrom=ev.target.value;render(); }
     if (ev.target.matches('[data-statement-to]')) { S.statementTo=ev.target.value;render(); }
   });
