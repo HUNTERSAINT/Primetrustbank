@@ -781,6 +781,9 @@ function processDueTransfers(userId){
   const due=db.prepare("SELECT * FROM scheduled_transfers WHERE user_id=? AND status='scheduled' AND scheduled_at<=? ORDER BY scheduled_at LIMIT 10").all(userId,now());
   for(const item of due){
     try{
+      const cap=db.prepare('SELECT daily_transfer_limit FROM account_limits WHERE user_id=?').get(userId);
+      const dailyCap=cap?cap.daily_transfer_limit:500000;
+      if(item.amount>dailyCap||transferDailyTotal(userId)+item.amount>dailyCap)throw new Error('Daily transfer limit exceeded.');
       const dest=db.prepare("SELECT a.*,u.full_name FROM accounts a JOIN users u ON u.id=a.user_id WHERE a.account_number=? AND a.kind='user'").get(item.recipient_account);
       const src=getUserAccount(userId);
       if(!dest||!src)throw new Error('Recipient account unavailable.');
