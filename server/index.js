@@ -335,12 +335,24 @@ app.get('/api/admin/overview', adminAuth, wrap(async (req, res) => {
   const openChats = (await db.get("SELECT COUNT(*) n FROM support_sessions WHERE status='open'", [])).n;
   res.json({stats:{totalUsers:users.total||0,activeUsers:users.active||0,suspendedUsers:users.suspended||0,pendingKyc:kyc,totalTransactions:tx,totalUserBalances:balances,todayTransactions:todayTx,openChats},recentUsers,recentTransactions:recentTx});
 }));
+app.get('/api/admin/card-settings',adminAuth,wrap(async(req,res)=>{
+ const s=await db.get('SELECT physical_card_fee_cents FROM card_product_settings WHERE id=1');
+ res.json({physical_card_fee_cents:s?s.physical_card_fee_cents:2500});
+}));
+app.patch('/api/admin/card-settings',adminAuth,wrap(async(req,res)=>{
+ const fee=Number((req.body||{}).physical_card_fee_cents);
+ if(!Number.isSafeInteger(fee)||fee<0||fee>50000)throw httpErr(400,'Physical card fee must be between USD 0 and USD 500.00.');
+ await db.run('INSERT INTO card_product_settings (id,physical_card_fee_cents,updated_at,updated_by) VALUES (1,?,?,?) ON CONFLICT(id) DO UPDATE SET physical_card_fee_cents=excluded.physical_card_fee_cents,updated_at=excluded.updated_at,updated_by=excluded.updated_by',[fee,now(),String(req.admin.email||'admin')]);
+ await auditAdmin(req,'PHYSICAL_CARD_FEE_UPDATED',null,fee,'Physical card fee changed');
+ res.json({ok:true,physical_card_fee_cents:fee});
+}));
 app.get('/api/admin/card-requests', adminAuth, wrap(async (req,res)=>{
   const status=String(req.query.status||'pending');
   if(status!=='pending')throw httpErr(400,'Only pending card requests can be reviewed here.');
-  const requests=await db.all("SELECT cr.user_id,cr.status,cr.requested_at,u.full_name,u.email,a.account_number FROM card_requests cr JOIN users u ON u.id=cr.user_id LEFT JOIN accounts a ON a.user_id=u.id AND a.kind='user' WHERE cr.status='pending' ORDER BY cr.requested_at ASC LIMIT 200", []);
+  const requests=await db.all("SELECT cr.user_id,cr.status,cr.card_tier,cr.physical_requested,cr.physical_fee_cents,cr.requested_at,u.full_name,u.email,a.account_number FROM card_requests cr JOIN users u ON u.id=cr.user_id LEFT JOIN accounts a ON a.user_id=u.id AND a.kind='user' WHERE cr.status='pending' ORDER BY cr.requested_at ASC LIMIT 200", []);
   const pending=(await db.get("SELECT COUNT(*) n FROM card_requests WHERE status='pending'", [])).n;
-  res.json({requests,pending});
+  const setting=await db.get('SELECT physical_card_fee_cents FROM card_product_settings WHERE id=1');
+  res.json({requests,pending,physical_fee_cents:setting?setting.physical_card_fee_cents:2500});
 }));
 app.get('/api/admin/users', adminAuth, wrap(async (req,res)=>{
   const q=String(req.query.q||'').trim().slice(0,100), status=String(req.query.status||'all');
@@ -354,7 +366,7 @@ app.get('/api/admin/users', adminAuth, wrap(async (req,res)=>{
 }));
 app.get('/api/admin/users/:id', adminAuth, wrap(async (req,res)=>{
   const id=Number(req.params.id); if(!Number.isSafeInteger(id)||id<1) throw httpErr(400,'Invalid customer ID.');
-  const user=(await db.get("SELECT u.id,u.full_name,u.email,u.status,u.verification_status,u.verification_submitted_at,u.created_at,a.id account_id,a.account_number,a.currency,a.balance,c.last4,c.expiry,c.frozen,c.demo_number,c.demo_cvv FROM users u JOIN accounts a ON a.user_id=u.id AND a.kind='user' LEFT JOIN cards c ON c.account_id=a.id WHERE u.id=?", [id]));
+  const user=(await db.get("SELECT u.id,u.full_name,u.email,u.status,u.verification_status,u.verification_submitted_at,u.created_at,a.id account_id,a.account_number,a.currency,a.balance,c.last4,c.expiry,c.frozen,c.demo_number,c.demo_cvv,c.card_tier,c.physical_requested,c.physical_status FROM users u JOIN accounts a ON a.user_id=u.id AND a.kind='user' LEFT JOIN cards c ON c.account_id=a.id WHERE u.id=?", [id]));
   const cardRequest=(await db.get('SELECT status,requested_at,reviewed_at,reviewed_by FROM card_requests WHERE user_id=?', [id]))||null;
   if(!user) throw httpErr(404,'Customer not found.');
   const transactions=(await db.all("SELECT id,type,amount,balance_after,counterparty,note,created_at FROM transactions WHERE account_id=? ORDER BY id DESC LIMIT 30", [user.account_id]));
@@ -423,13 +435,24 @@ app.post('/api/admin/external-transfers/:id/review',adminAuth,wrap(async(req,res
 app.post('/api/admin/users/:id/card/issue',adminAuth,wrap(async (req,res)=>{
  const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid customer ID.');
  const account=(await db.get("SELECT a.id FROM accounts a WHERE a.user_id=? AND a.kind='user'", [id]));if(!account)throw httpErr(404,'Customer account not found.');
- const rq=(await db.get("SELECT status FROM card_requests WHERE user_id=?", [id]));if(!rq||rq.status!=='pending')throw httpErr(409,'Customer must request a card before it can be granted.');
+ const rq=(await db.get("SELECT status,card_tier,physical_requested,physical_fee_cents FROM card_requests WHERE user_id=?", [id]));if(!rq||rq.status!=='pending')throw httpErr(409,'Customer must request a card before it can be granted.');
  if((await db.get('SELECT 1 FROM cards WHERE account_id=?', [account.id])))throw httpErr(409,'Card already issued.');
+ const tier=['normal','black','platinum'].includes(rq.card_tier)?rq.card_tier:'normal',physical=!!rq.physical_requested;
  const number=demoCardNumber(),cvv=String(crypto.randomInt(100,1000)),exp=new Date();exp.setFullYear(exp.getFullYear()+4);const expiry=String(exp.getMonth()+1).padStart(2,'0')+'/'+String(exp.getFullYear()).slice(2);
- (await db.tx(async ()=>{(await db.run('INSERT INTO cards (account_id,last4,expiry,demo_number,demo_cvv,activated) VALUES (?,?,?,?,?,0)', [account.id,number.slice(-4),expiry,number,cvv]));(await db.run("UPDATE card_requests SET status='granted',reviewed_at=?,reviewed_by=? WHERE user_id=?", [now(),String(req.admin.email||'admin'),id]));await auditAdmin(req,'CARD_GRANTED',id,null,'Admin issued requested card');}));
- await notifyUser(id,'Card issued','Your card request was approved. Your card is now available.','card');res.json({ok:true,last4:number.slice(-4),expiry});
+ (await db.tx(async ()=>{(await db.run('INSERT INTO cards (account_id,last4,expiry,demo_number,demo_cvv,activated,card_tier,physical_requested,physical_status) VALUES (?,?,?,?,?,0,?,?,?)', [account.id,number.slice(-4),expiry,number,cvv,tier,physical?1:0,physical?'ordered':'not_requested']));(await db.run("UPDATE card_requests SET status='granted',reviewed_at=?,reviewed_by=? WHERE user_id=?", [now(),String(req.admin.email||'admin'),id]));await auditAdmin(req,'CARD_GRANTED',id,null,'Issued '+tier+' card'+(physical?' with physical delivery':' digital only'));}));
+ await notifyUser(id,'Card issued',physical?'Your '+tier+' card request was approved. Your physical card is being prepared; activation will be available after delivery is confirmed.':'Your '+tier+' digital card request was approved. You can activate it from your dashboard.','card');res.json({ok:true,last4:number.slice(-4),expiry,tier,physical});
 }));
-app.post('/api/admin/users/:id/card/reject',adminAuth,wrap(async (req,res)=>{const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid customer ID.');const rq=(await db.get("SELECT status FROM card_requests WHERE user_id=?", [id]));if(!rq||rq.status!=='pending')throw httpErr(409,'No pending card request.');(await db.run("UPDATE card_requests SET status='rejected',reviewed_at=?,reviewed_by=? WHERE user_id=?", [now(),String(req.admin.email||'admin'),id]));await auditAdmin(req,'CARD_REQUEST_REJECTED',id,null,'Admin rejected card request');await notifyUser(id,'Card request update','Your card request was not approved. Contact support if you need more information.','card');res.json({ok:true});}));
+app.post('/api/admin/users/:id/card/reject',adminAuth,wrap(async (req,res)=>{const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid customer ID.');const rq=(await db.get("SELECT status,physical_fee_cents,physical_requested,card_tier FROM card_requests WHERE user_id=?", [id]));if(!rq||rq.status!=='pending')throw httpErr(409,'No pending card request.');await db.tx(async()=>{if(rq.physical_requested&&rq.physical_fee_cents>0){const to=await getUserAccount(id),from=await db.get("SELECT * FROM accounts WHERE account_number='SYS-CARD-FEES' AND kind='system'");if(!from||!to)throw httpErr(500,'Unable to refund the physical card fee.');await move({from,to,amount:rq.physical_fee_cents,typeOut:'physical_card_fee_refund',typeIn:'physical_card_fee_refund_in',counterOut:'Physical card fee refund',counterIn:'Card request refund',note:'Refund for rejected physical card request'});}await db.run("UPDATE card_requests SET status='rejected',reviewed_at=?,reviewed_by=? WHERE user_id=?", [now(),String(req.admin.email||'admin'),id]);await auditAdmin(req,'CARD_REQUEST_REJECTED',id,rq.physical_fee_cents||null,'Admin rejected '+rq.card_tier+' card request; physical fee refunded if charged');});await notifyUser(id,'Card request update','Your card request was not approved. Any physical card fee charged for this request has been returned.','card');res.json({ok:true});}));
+app.patch('/api/admin/users/:id/card/physical-status',adminAuth,wrap(async(req,res)=>{
+ const id=Number(req.params.id),status=String((req.body||{}).status||'');
+ if(!Number.isSafeInteger(id)||id<1||!['ordered','shipped','delivered'].includes(status))throw httpErr(400,'Choose a valid physical card delivery status.');
+ const account=await db.get("SELECT id FROM accounts WHERE user_id=? AND kind='user'",[id]);if(!account)throw httpErr(404,'Customer account not found.');
+ const card=await db.get('SELECT physical_requested,physical_status,card_tier FROM cards WHERE account_id=?',[account.id]);if(!card||!card.physical_requested)throw httpErr(404,'No physical card was requested for this customer.');
+ await db.run('UPDATE cards SET physical_status=? WHERE account_id=?',[status,account.id]);
+ await auditAdmin(req,'PHYSICAL_CARD_'+status.toUpperCase(),id,null,'Physical '+card.card_tier+' card delivery status updated');
+ await notifyUser(id,'Physical card delivery update','Your physical card status is now '+status+'.'+(status==='delivered'?' You can activate it from your dashboard.':''),'card');
+ res.json({ok:true,status});
+}));
 app.patch('/api/admin/users/:id/card', adminAuth, wrap(async (req,res)=>{
   const id=Number(req.params.id), frozen=(req.body||{}).frozen;
   if(!Number.isSafeInteger(id)||id<1||typeof frozen!=='boolean')throw httpErr(400,'Choose a valid card control.');
@@ -703,12 +726,14 @@ app.get('/api/impersonation/status', auth, wrap(async (req,res)=>{
 
 app.get('/api/me', auth, wrap(async (req, res) => {
   if(req.user.verification_status==='approved')await processDueTransfers(req.user.id);
-  const card=(await db.get('SELECT last4,expiry,frozen,activated,online_enabled,international_enabled,daily_limit,card_pin_hash FROM cards WHERE account_id=?', [req.account.id]));
-  const cardRequest=(await db.get('SELECT status,requested_at FROM card_requests WHERE user_id=?', [req.user.id]))||null;
+  const card=(await db.get('SELECT last4,expiry,frozen,activated,online_enabled,international_enabled,daily_limit,card_pin_hash,card_tier,physical_requested,physical_status FROM cards WHERE account_id=?', [req.account.id]));
+  const cardProduct=await db.get('SELECT physical_card_fee_cents FROM card_product_settings WHERE id=1');
+  const cardRequest=(await db.get('SELECT status,requested_at,card_tier,physical_requested,physical_fee_cents FROM card_requests WHERE user_id=?', [req.user.id]))||null;
   const kycInfo=(await db.get('SELECT admin_note,upgrade_status,upgrade_note,id_expiry FROM verification_requests WHERE user_id=?', [req.user.id]))||null;
   res.json({name:req.user.full_name,email:req.user.email,verification_status:req.user.verification_status,kyc_tier:req.user.kyc_tier,tier:kyc.tierOf(req.user),kyc:kycInfo,mfa_enabled:!!req.user.mfa_enabled,
     account:{number:req.account.account_number,currency:req.account.currency,balance:req.account.balance},
-    card:card?{last4:card.last4,expiry:card.expiry,frozen:!!card.frozen,activated:!!card.activated,online_enabled:!!card.online_enabled,international_enabled:!!card.international_enabled,daily_limit:card.daily_limit,card_pin_set:!!card.card_pin_hash}:null,
+    card:card?{last4:card.last4,expiry:card.expiry,frozen:!!card.frozen,activated:!!card.activated,online_enabled:!!card.online_enabled,international_enabled:!!card.international_enabled,daily_limit:card.daily_limit,card_pin_set:!!card.card_pin_hash,tier:card.card_tier||'normal',physical_requested:!!card.physical_requested,physical_status:card.physical_status||'not_requested'}:null,
+    card_options:{physical_fee_cents:cardProduct?cardProduct.physical_card_fee_cents:2500},
     card_request:cardRequest,sandbox_funding:SANDBOX_FUNDING});
 }));
 
@@ -855,11 +880,18 @@ app.post('/api/deposit', auth, requireVerified, moneyLimiter, wrap(async (req, r
 
 app.post('/api/card/request',auth,requireVerified,sensitiveWriteLimiter,wrap(async (req,res)=>{
  if((await db.get('SELECT 1 FROM cards WHERE account_id=?', [req.account.id])))throw httpErr(409,'A card has already been issued.');
+ const body=req.body||{},tier=String(body.tier||'normal').toLowerCase(),physical=body.physical===true;
+ if(!['normal','black','platinum'].includes(tier))throw httpErr(400,'Choose Normal, Black or Platinum card.');
  const old=(await db.get('SELECT status FROM card_requests WHERE user_id=?', [req.user.id]));
  if(old&&old.status==='pending')throw httpErr(409,'Your card request is already awaiting administrator review.');
- (await db.run("INSERT INTO card_requests (user_id,status,requested_at) VALUES (?,'pending',?) ON CONFLICT(user_id) DO UPDATE SET status='pending',requested_at=excluded.requested_at,reviewed_at=NULL,reviewed_by=NULL", [req.user.id,now()]));
- await notifyUser(req.user.id,'Card request received','Your card request is awaiting administrator approval.','card');
- res.status(201).json({ok:true,status:'pending'});
+ await verifyPin(req.user,String(body.pin||''));
+ const setting=await db.get('SELECT physical_card_fee_cents FROM card_product_settings WHERE id=1'),fee=physical?(setting?setting.physical_card_fee_cents:2500):0;
+ await db.tx(async()=>{
+  if(physical&&fee>0){const from=await getUserAccount(req.user.id),to=await db.get("SELECT * FROM accounts WHERE account_number='SYS-CARD-FEES' AND kind='system'");if(!from||!to)throw httpErr(500,'Physical card fee processing is unavailable.');await move({from,to,amount:fee,typeOut:'physical_card_fee',typeIn:'physical_card_fee_received',counterOut:'Physical card request fee',counterIn:'Card fee account',note:'Physical '+tier+' card request fee'});}
+  await db.run("INSERT INTO card_requests (user_id,status,card_tier,physical_requested,physical_fee_cents,requested_at) VALUES (?,'pending',?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET status='pending',card_tier=excluded.card_tier,physical_requested=excluded.physical_requested,physical_fee_cents=excluded.physical_fee_cents,requested_at=excluded.requested_at,reviewed_at=NULL,reviewed_by=NULL",[req.user.id,tier,physical?1:0,fee,now()]);
+ });
+ await notifyUser(req.user.id,'Card request received','Your '+tier+' card request is awaiting administrator review'+(physical?'. Physical card fee: USD '+(fee/100).toFixed(2):' (digital card).'),'card');
+ res.status(201).json({ok:true,status:'pending',tier,physical,physical_fee_cents:fee});
 }));
 app.post('/api/card/details',auth,requireVerified,sensitiveWriteLimiter,wrap(async (req,res)=>{
  const c=(await db.get('SELECT demo_number,demo_cvv,expiry FROM cards WHERE account_id=?', [req.account.id]));
@@ -869,15 +901,17 @@ app.post('/api/card/details',auth,requireVerified,sensitiveWriteLimiter,wrap(asy
  res.json({card:{number:c.demo_number,cvv:c.demo_cvv,expiry:c.expiry}});
 }));
 app.get('/api/card/settings',auth,requireVerified,wrap(async (req,res)=>{
- const c=(await db.get('SELECT activated,online_enabled,international_enabled,daily_limit,card_pin_hash,frozen FROM cards WHERE account_id=?', [req.account.id]));
+ const c=(await db.get('SELECT activated,online_enabled,international_enabled,daily_limit,card_pin_hash,frozen,physical_requested,physical_status FROM cards WHERE account_id=?', [req.account.id]));
  if(!c)throw httpErr(404,'No card has been issued to this account yet.');
- res.json({settings:{activated:!!c.activated,online_enabled:!!c.online_enabled,international_enabled:!!c.international_enabled,daily_limit:c.daily_limit,card_pin_set:!!c.card_pin_hash,frozen:!!c.frozen}});
+ res.json({settings:{activated:!!c.activated,online_enabled:!!c.online_enabled,international_enabled:!!c.international_enabled,daily_limit:c.daily_limit,card_pin_set:!!c.card_pin_hash,frozen:!!c.frozen,physical_requested:!!c.physical_requested,physical_status:c.physical_status}});
 }));
 app.patch('/api/card/settings',auth,requireVerified,sensitiveWriteLimiter,wrap(async (req,res)=>{
   if(!(await db.get('SELECT 1 FROM cards WHERE account_id=?', [req.account.id])))throw httpErr(404,'No card has been issued to this account yet.');
 
   const b=req.body||{},limit=Number(b.daily_limit);
   if(typeof b.activated!=='boolean'||typeof b.online_enabled!=='boolean'||typeof b.international_enabled!=='boolean'||!Number.isSafeInteger(limit)||limit<10000||limit>10000000)throw httpErr(400,'Choose valid card settings and a daily limit between USD 100 and USD 100,000.');
+  const cardState=await db.get('SELECT physical_requested,physical_status FROM cards WHERE account_id=?',[req.account.id]);
+  if(b.activated&&cardState&&cardState.physical_requested&&cardState.physical_status!=='delivered')throw httpErr(403,'Your physical card must be marked delivered before activation.');
   await verifyPin(req.user,String(b.transaction_pin||''));
   (await db.run('UPDATE cards SET activated=?,online_enabled=?,international_enabled=?,daily_limit=? WHERE account_id=?', [b.activated?1:0,b.online_enabled?1:0,b.international_enabled?1:0,limit,req.account.id]));
   res.json({ok:true});
