@@ -139,6 +139,12 @@ for (const column of ['id_front_data','id_back_data','selfie_data']) {
 }
 
 
+const cardColumns = db.prepare('PRAGMA table_info(cards)').all().map((c) => c.name);
+if (!cardColumns.includes('activated')) db.exec('ALTER TABLE cards ADD COLUMN activated INTEGER NOT NULL DEFAULT 1');
+if (!cardColumns.includes('online_enabled')) db.exec('ALTER TABLE cards ADD COLUMN online_enabled INTEGER NOT NULL DEFAULT 1');
+if (!cardColumns.includes('international_enabled')) db.exec('ALTER TABLE cards ADD COLUMN international_enabled INTEGER NOT NULL DEFAULT 0');
+if (!cardColumns.includes('daily_limit')) db.exec('ALTER TABLE cards ADD COLUMN daily_limit INTEGER NOT NULL DEFAULT 250000');
+if (!cardColumns.includes('card_pin_hash')) db.exec('ALTER TABLE cards ADD COLUMN card_pin_hash TEXT');
 const mfaColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
 if (!mfaColumns.includes('mfa_enabled')) db.exec('ALTER TABLE users ADD COLUMN mfa_enabled INTEGER NOT NULL DEFAULT 0');
 db.exec(`
