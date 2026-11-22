@@ -26,10 +26,12 @@ function client() {
   const a = client(), b = client(), admin = client();
   let r;
 
-  r = await a('POST', '/api/auth/register', { email: 'ada@example.com', full_name: 'Ada Okafor', password: 'longpassword1', pin: '1234' });
-  assert.equal(r.status, 201, 'register a');
-  r = await b('POST', '/api/auth/register', { email: 'tolu@example.com', full_name: 'Tolu Bello', password: 'longpassword2', pin: '4321' });
-  assert.equal(r.status, 201, 'register b');
+  const registrationKycA = { legal_name: 'Ada Okafor', date_of_birth: '1995-05-12', address: '12 Example Street, Lagos, Nigeria', id_type: 'Passport', id_front: 'data:image/jpeg;base64,AA==', id_back: '', selfie: '' };
+  const registrationKycB = { ...registrationKycA, legal_name: 'Tolu Bello' };
+  r = await a('POST', '/api/auth/register', { email: 'ada@example.com', full_name: 'Ada Okafor', password: 'longpassword1', pin: '1234', ...registrationKycA });
+  assert.equal(r.status, 201, 'register a with KYC');
+  r = await b('POST', '/api/auth/register', { email: 'tolu@example.com', full_name: 'Tolu Bello', password: 'longpassword2', pin: '4321', ...registrationKycB });
+  assert.equal(r.status, 201, 'register b with KYC');
   // Identity review is required before any banking action.
   r = await a('POST', '/api/deposit', { amount: 20 });
   assert.equal(r.status, 403, 'pending user cannot use banking actions');
