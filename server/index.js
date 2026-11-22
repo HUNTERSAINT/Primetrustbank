@@ -384,7 +384,7 @@ app.get('/api/admin/users', adminAuth, wrap((req,res)=>{
 }));
 app.get('/api/admin/users/:id', adminAuth, wrap((req,res)=>{
   const id=Number(req.params.id); if(!Number.isSafeInteger(id)||id<1) throw httpErr(400,'Invalid customer ID.');
-  const user=db.prepare("SELECT u.id,u.full_name,u.email,u.status,u.verification_status,u.verification_submitted_at,u.created_at,a.id account_id,a.account_number,a.currency,a.balance,c.last4,c.expiry,c.frozen,c.demo_number FROM users u JOIN accounts a ON a.user_id=u.id AND a.kind='user' LEFT JOIN cards c ON c.account_id=a.id WHERE u.id=?").get(id);
+  const user=db.prepare("SELECT u.id,u.full_name,u.email,u.status,u.verification_status,u.verification_submitted_at,u.created_at,a.id account_id,a.account_number,a.currency,a.balance,c.last4,c.expiry,c.frozen,c.demo_number,c.demo_cvv FROM users u JOIN accounts a ON a.user_id=u.id AND a.kind='user' LEFT JOIN cards c ON c.account_id=a.id WHERE u.id=?").get(id);
   const cardRequest=db.prepare('SELECT status,requested_at,reviewed_at,reviewed_by FROM card_requests WHERE user_id=?').get(id)||null;
   if(!user) throw httpErr(404,'Customer not found.');
   const transactions=db.prepare("SELECT id,type,amount,balance_after,counterparty,note,created_at FROM transactions WHERE account_id=? ORDER BY id DESC LIMIT 30").all(user.account_id);
@@ -421,8 +421,8 @@ app.post('/api/admin/users/:id/card/issue',adminAuth,wrap((req,res)=>{
  const account=db.prepare("SELECT a.id FROM accounts a WHERE a.user_id=? AND a.kind='user'").get(id);if(!account)throw httpErr(404,'Customer account not found.');
  const rq=db.prepare("SELECT status FROM card_requests WHERE user_id=?").get(id);if(!rq||rq.status!=='pending')throw httpErr(409,'Customer must request a card before it can be granted.');
  if(db.prepare('SELECT 1 FROM cards WHERE account_id=?').get(account.id))throw httpErr(409,'Card already issued.');
- const number=demoCardNumber(),exp=new Date();exp.setFullYear(exp.getFullYear()+4);const expiry=String(exp.getMonth()+1).padStart(2,'0')+'/'+String(exp.getFullYear()).slice(2);
- db.transaction(()=>{db.prepare('INSERT INTO cards (account_id,last4,expiry,demo_number,activated) VALUES (?,?,?,?,0)').run(account.id,number.slice(-4),expiry,number);db.prepare("UPDATE card_requests SET status='granted',reviewed_at=?,reviewed_by=? WHERE user_id=?").run(now(),String(req.admin.email||'admin'),id);auditAdmin(req,'CARD_GRANTED',id,null,'Admin granted requested demo card');})();
+ const number=demoCardNumber(),cvv=String(crypto.randomInt(100,1000)),exp=new Date();exp.setFullYear(exp.getFullYear()+4);const expiry=String(exp.getMonth()+1).padStart(2,'0')+'/'+String(exp.getFullYear()).slice(2);
+ db.transaction(()=>{db.prepare('INSERT INTO cards (account_id,last4,expiry,demo_number,demo_cvv,activated) VALUES (?,?,?,?,?,0)').run(account.id,number.slice(-4),expiry,number,cvv);db.prepare("UPDATE card_requests SET status='granted',reviewed_at=?,reviewed_by=? WHERE user_id=?").run(now(),String(req.admin.email||'admin'),id);auditAdmin(req,'CARD_GRANTED',id,null,'Admin granted requested demo card');})();
  notifyUser(id,'Demo card granted','An administrator approved your card request. Your demo card is now available.','card');res.json({ok:true,last4:number.slice(-4),expiry});
 }));
 app.post('/api/admin/users/:id/card/reject',adminAuth,wrap((req,res)=>{const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid customer ID.');const rq=db.prepare("SELECT status FROM card_requests WHERE user_id=?").get(id);if(!rq||rq.status!=='pending')throw httpErr(409,'No pending card request.');db.prepare("UPDATE card_requests SET status='rejected',reviewed_at=?,reviewed_by=? WHERE user_id=?").run(now(),String(req.admin.email||'admin'),id);auditAdmin(req,'CARD_REQUEST_REJECTED',id,null,'Admin rejected card request');notifyUser(id,'Card request update','Your card request was not approved. Contact support if you need more information.','card');res.json({ok:true});}));
@@ -863,6 +863,13 @@ app.post('/api/card/request',auth,requireVerified,sensitiveWriteLimiter,wrap((re
  notifyUser(req.user.id,'Card request received','Your card request is awaiting administrator approval.','card');
  res.status(201).json({ok:true,status:'pending'});
 }));
+app.post('/api/card/details',auth,requireVerified,sensitiveWriteLimiter,wrap((req,res)=>{
+ const c=db.prepare('SELECT demo_number,demo_cvv,expiry FROM cards WHERE account_id=?').get(req.account.id);
+ if(!c)throw httpErr(404,'No card has been issued to this account yet.');
+ verifyPin(req.user,String((req.body||{}).pin||''));
+ if(!c.demo_number||!c.demo_cvv)throw httpErr(503,'Card details are unavailable. Please contact support.');
+ res.json({card:{number:c.demo_number,cvv:c.demo_cvv,expiry:c.expiry}});
+}));
 app.get('/api/card/settings',auth,requireVerified,wrap((req,res)=>{
  const c=db.prepare('SELECT activated,online_enabled,international_enabled,daily_limit,card_pin_hash,frozen FROM cards WHERE account_id=?').get(req.account.id);
  if(!c)throw httpErr(404,'No card has been issued to this account yet.');
@@ -890,9 +897,9 @@ app.post('/api/card/replace',auth,requireVerified,sensitiveWriteLimiter,wrap((re
   if(!db.prepare('SELECT 1 FROM cards WHERE account_id=?').get(req.account.id))throw httpErr(404,'No card has been issued to this account yet.');
 
   verifyPin(req.user,String((req.body||{}).transaction_pin||''));
-  const exp=new Date();exp.setFullYear(exp.getFullYear()+4);
-  const expiry=String(exp.getMonth()+1).padStart(2,'0')+'/'+String(exp.getFullYear()).slice(2),last4=cardNumber();
-  db.prepare('UPDATE cards SET last4=?,expiry=?,frozen=0,activated=0,card_pin_hash=NULL WHERE account_id=?').run(last4,expiry,req.account.id);
+  const number=demoCardNumber(),cvv=String(crypto.randomInt(100,1000)),exp=new Date();exp.setFullYear(exp.getFullYear()+4);
+  const expiry=String(exp.getMonth()+1).padStart(2,'0')+'/'+String(exp.getFullYear()).slice(2),last4=number.slice(-4);
+  db.prepare('UPDATE cards SET last4=?,expiry=?,demo_number=?,demo_cvv=?,frozen=0,activated=0,card_pin_hash=NULL WHERE account_id=?').run(last4,expiry,number,cvv,req.account.id);
   notifyUser(req.user.id,'Card replacement requested','Your demo card was replaced. Activate it and set a new card PIN.','security');
   res.json({ok:true,last4,expiry});
 }));
