@@ -439,6 +439,22 @@ app.get('/api/admin/kyc', adminAuth, wrap((req,res)=>{
   const rows=db.prepare("SELECT vr.id,vr.user_id,vr.legal_name,vr.date_of_birth,vr.address,vr.id_type,vr.review_status,vr.admin_note,vr.submitted_at,vr.reviewed_at,u.email,u.full_name,a.account_number FROM verification_requests vr JOIN users u ON u.id=vr.user_id LEFT JOIN accounts a ON a.user_id=u.id AND a.kind='user' "+(wanted==='all'?'':"WHERE vr.review_status=?")+" ORDER BY vr.submitted_at DESC LIMIT 200").all(...(wanted==='all'?[]:[wanted]));
   res.json({requests:rows});
 }));
+app.get('/api/admin/disputes',adminAuth,wrap((req,res)=>{
+  const status=String(req.query.status||'all');
+  if(!['all','open','investigating','resolved','rejected'].includes(status))throw httpErr(400,'Invalid dispute status.');
+  const rows=db.prepare("SELECT d.id,d.user_id,d.transaction_id,d.reason,d.details,d.status,d.created_at,d.updated_at,u.full_name,u.email,a.account_number,t.type transaction_type,t.amount transaction_amount,t.counterparty,t.created_at transaction_created FROM disputes d JOIN users u ON u.id=d.user_id JOIN accounts a ON a.user_id=u.id AND a.kind='user' JOIN transactions t ON t.id=d.transaction_id WHERE (?='all' OR d.status=?) ORDER BY d.created_at DESC LIMIT 250").all(status,status);
+  res.json({disputes:rows});
+}));
+app.patch('/api/admin/disputes/:id',adminAuth,wrap((req,res)=>{
+  const id=Number(req.params.id),status=String((req.body||{}).status||'');
+  if(!Number.isSafeInteger(id)||id<1||!['investigating','resolved','rejected'].includes(status))throw httpErr(400,'Choose a valid dispute status.');
+  const dispute=db.prepare('SELECT user_id,status FROM disputes WHERE id=?').get(id);
+  if(!dispute)throw httpErr(404,'Dispute not found.');
+  db.prepare('UPDATE disputes SET status=?,updated_at=? WHERE id=?').run(status,now(),id);
+  auditAdmin(req,'DISPUTE_STATUS_UPDATED',dispute.user_id,null,'Dispute #'+id+' status changed to '+status);
+  notifyUser(dispute.user_id,'Dispute status updated','Your transaction dispute is now '+status+'.','support');
+  res.json({ok:true,status});
+}));
 app.get('/api/admin/audit', adminAuth, wrap((req,res)=>{
   const limit=Math.min(Math.max(Number(req.query.limit)||100,1),250);
   res.json({events:db.prepare("SELECT id,admin_email,action,target_user_id,amount,details,created_at FROM admin_audit ORDER BY id DESC LIMIT ?").all(limit)});
