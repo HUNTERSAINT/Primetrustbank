@@ -25,7 +25,7 @@
   var goalData = null; try { goalData = JSON.parse(localStorage.getItem('ptb_goal') || 'null'); } catch (_) {}
   var resetToken = new URLSearchParams(window.location.search).get('reset') || '';
   var mfaChallengeId = '';
-  var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, selectedTx: null, statementFrom: '', statementTo: '', transferDraft: null, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], sessions: [], impersonation: { active: false }, cardReveal: null };
+  var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, selectedTx: null, statementFrom: '', statementTo: '', transferDraft: null, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], externalTransfers: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], sessions: [], impersonation: { active: false }, cardReveal: null };
 
   // ---------- api ----------
   function api(method, url, body, idem) {
@@ -40,8 +40,8 @@
       });
   }
   function load() {
-    return Promise.all([api('GET', '/api/me'), api('GET', '/api/transactions?limit=50'), api('GET', '/api/beneficiaries'), api('GET', '/api/impersonation/status'), api('GET','/api/notifications'), api('GET','/api/transfers/scheduled'), api('GET','/api/disputes'), api('GET','/api/account/limits'), api('GET','/api/beneficiaries/saved')])
-      .then(function (r) { S.me = r[0]; S.txs = r[1].transactions; S.benes = r[2].beneficiaries; S.impersonation = r[3] || {active:false}; S.notifications=r[4].notifications||[]; S.scheduled=r[5].transfers||[]; S.disputes=r[6].disputes||[]; S.limits=r[7].limits||S.limits; S.limits.transfer_used=r[7].transfer_used||0; S.savedBenes=r[8].beneficiaries||[]; });
+    return Promise.all([api('GET', '/api/me'), api('GET', '/api/transactions?limit=50'), api('GET', '/api/beneficiaries'), api('GET', '/api/impersonation/status'), api('GET','/api/notifications'), api('GET','/api/transfers/scheduled'), api('GET','/api/disputes'), api('GET','/api/account/limits'), api('GET','/api/beneficiaries/saved'), api('GET','/api/external-transfers')])
+      .then(function (r) { S.me = r[0]; S.txs = r[1].transactions; S.benes = r[2].beneficiaries; S.impersonation = r[3] || {active:false}; S.notifications=r[4].notifications||[]; S.scheduled=r[5].transfers||[]; S.disputes=r[6].disputes||[]; S.limits=r[7].limits||S.limits; S.limits.transfer_used=r[7].transfer_used||0; S.savedBenes=r[8].beneficiaries||[]; S.externalTransfers=r[9].transfers||[]; });
   }
   var tt;
   function toast(m) {
@@ -273,10 +273,13 @@
   function vTransfers() {
     var rec = S.benes.length ? S.benes.map(function(b){return '<div class="tr">'+avatar(b.name)+'<div class="m"><b>'+esc(b.name)+'</b><small>Account · '+esc(b.account_number)+'</small></div><button class="copy" data-act="pick" data-acct="'+esc(b.account_number)+'">Send</button></div>';}).join('') : '<p class="empty">Your saved recipients will appear here after your first transfer.</p>';
     var recent = S.txs.filter(function(t){return t.type==='transfer_out'||t.type==='transfer_in';}).slice(0,4).map(txRow).join('') || '<p class="empty">No transfers yet.</p>';
-    return '<section class="screen">'+pageHead('Transfers','Send money to another Prime Trust account')+
-      '<div class="panel"><div class="hrow"><div><b>Domestic transfer</b><small>Account-to-account</small></div><div class="sp"></div><button class="addf" data-act="sheet" data-s="send">New transfer</button></div><p class="lead" style="margin-top:10px">Confirm the recipient name and amount before approving with your transaction PIN.</p></div>'+
+    var extRows=S.externalTransfers.map(function(x){return '<div class="tr"><span class="ti">'+ic('up')+'</span><div class="m"><b>'+esc(x.bank_name)+' · '+esc(x.account_name)+'</b><small>'+esc(x.account_number)+' · '+esc(x.status.replace(/_/g,' '))+' · '+esc(fdate(x.created_at))+'</small><small>'+(x.transfer_reference?'Reference: '+esc(x.transfer_reference):'Funds reserved pending administrator processing')+'</small></div><span class="r"><b>USD '+money(x.amount)+'</b><small>'+esc(x.status.replace(/_/g,' '))+'</small></span></div>';}).join('')||'<p class="empty">No external bank transfer requests yet.</p>';
+    return '<section class="screen">'+pageHead('Transfers','Send money within Prime Trust or request an external bank transfer')+
+      '<div class="panel"><div class="hrow"><div><b>Prime Trust transfer</b><small>Account-to-account</small></div><div class="sp"></div><button class="addf" data-act="sheet" data-s="send">New transfer</button></div><p class="lead" style="margin-top:10px">Internal transfers are sent to another Prime Trust account.</p></div>'+
+      '<div class="panel" style="margin-top:12px"><h3>Transfer to another bank</h3><p class="lead" style="margin:8px 0 14px">External transfers are submitted for administrator processing. The amount is reserved from your balance. It is not marked complete until an administrator records the actual bank transfer reference.</p><form class="form" data-form="external-transfer"><label class="field">Destination bank<input name="bank_name" required minlength="2" maxlength="100" placeholder="Bank name"></label><label class="field">Account holder name<input name="account_name" required minlength="2" maxlength="100" placeholder="Full name on bank account"></label><label class="field">Account number<input name="account_number" required inputmode="numeric" minlength="6" maxlength="34" placeholder="Bank account number"></label><label class="field">Amount (USD)<input name="amount" type="number" inputmode="decimal" min="0.01" step="0.01" required placeholder="0.00"></label><label class="field">Payment note (optional)<input name="note" maxlength="100" placeholder="Purpose of transfer"></label><label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required autocomplete="off"></label><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Submit transfer request</button></form></div>'+
+      '<div class="trh"><b>My external transfer requests</b><span class="muted">'+S.externalTransfers.length+' requests</span></div><div class="panel">'+extRows+'</div>'+
       '<div class="trh"><b>Recipients</b><span class="muted">'+S.benes.length+' saved</span></div><div class="panel">'+rec+'</div>'+
-      '<div class="trh"><b>Recent transfers</b><button data-act="go" data-v="history">All activity</button></div>'+recent+'</section>'+dock('transfers');
+      '<div class="trh"><b>Recent Prime Trust transfers</b><button data-act="go" data-v="history">All activity</button></div>'+recent+'</section>'+dock('transfers');
   }
   function vPayments() {
     return '<section class="screen">'+pageHead('Payments','Everyday bill payments')+
@@ -591,7 +594,7 @@
       S.sheet=null; S.view='savings'; render(); toast('Savings goal saved'); return;
     }
     else if (kind === 'send-review') { api('GET','/api/accounts/lookup/'+encodeURIComponent(d.to_account)).then(function(rec){S.transferDraft={to_account:d.to_account,amount:d.amount,note:d.note,recipient:rec.name};S.sheet='send-confirm';render();}).catch(function(e){busy(form,false);setErr(form,e.message);});return; }
-    else if (kind === 'send-confirm') p = api('POST', '/api/transfers', { to_account: S.transferDraft.to_account, amount: S.transferDraft.amount, pin: d.pin, note: S.transferDraft.note }, S.idem);
+    else if (kind === 'send-confirm') p = api('POST', '/api/transfers', { to_account: S.transferDraft.to_account, amount: S.transferDraft.amount, pin: d.pin, note: S.transferDraft.note }, S.idem);\n    else if (kind === 'external-transfer') p = api('POST','/api/external-transfers',{bank_name:d.bank_name,account_name:d.account_name,account_number:d.account_number,amount:d.amount,pin:d.pin,note:d.note},S.idem);
     else if (kind === 'bills') p = api('POST', '/api/bills', { biller: d.biller, reference: d.reference, amount: d.amount, pin: d.pin }, S.idem);
     else return;
     p.then(function (res) {
@@ -605,7 +608,7 @@
       if (kind === 'mfa-disable') return load().then(function(){S.sheet=null;S.view='security';render();toast('Multi-factor authentication disabled');});
       if (kind === 'forgot') { S.view='login';render();toast('If your account exists, recovery instructions were sent.');return; }
       if (kind === 'reset') { resetToken='';try{history.replaceState(null,'',location.pathname);}catch(_){} S.view='login';render();toast('Password updated. Sign in with your new password.');return; }
-      if (kind === 'support') return api('GET','/api/support/messages').then(function(d){S.support=d;render();toast('Message sent to support');});
+      if (kind === 'external-transfer') return done('External transfer request submitted for administrator processing');\n      if (kind === 'support') return api('GET','/api/support/messages').then(function(d){S.support=d;render();toast('Message sent to support');});
       if (kind === 'schedule') return load().then(function(){S.view='scheduled';render();toast('Transfer scheduled');});
       if (kind === 'dispute') return load().then(function(){S.view='disputes';render();toast('Dispute submitted');});
       if (kind === 'limits') return load().then(function(){S.view='limits';render();toast('Limits saved');});
