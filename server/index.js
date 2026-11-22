@@ -42,6 +42,7 @@ app.use(helmet({
 }));
 app.use(express.json({ limit: '5mb', strict: true }));
 app.use(cookieParser());
+app.use('/api', (req,res,next)=>{ res.set('Cache-Control','no-store, private'); res.set('Pragma','no-cache'); next(); });
 
 // ---------- helpers ----------
 const now = () => Date.now();
@@ -128,10 +129,15 @@ function auth(req, res, next) {
   } catch { fail(res, 401, 'Please log in.'); }
 }
 
-// Block cross-site form posts: state-changing calls must be JSON.
+// Defense-in-depth CSRF protection: same-origin browser requests only, plus JSON-only writes.
 app.use('/api', (req, res, next) => {
-  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && !req.is('application/json')) {
-    return fail(res, 415, 'Content-Type must be application/json');
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    const origin = req.get('Origin');
+    if (origin) {
+      try { if (new URL(origin).host !== req.get('host') || (PROD && new URL(origin).protocol !== 'https:')) return fail(res, 403, 'Cross-origin request blocked.'); }
+      catch { return fail(res, 403, 'Invalid request origin.'); }
+    } else if (req.get('Sec-Fetch-Site') === 'cross-site') return fail(res, 403, 'Cross-site request blocked.');
+    if (!req.is('application/json')) return fail(res, 415, 'Content-Type must be application/json');
   }
   next();
 });
@@ -143,6 +149,8 @@ const adminLoginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standa
 const adminApiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: true, legacyHeaders: false,
   message: { error: 'Administrator request limit reached. Slow down.' } });
 app.use('/api/admin', adminApiLimiter);
+const sensitiveWriteLimiter = rateLimit({ windowMs: 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many requests. Please wait before trying again.' } });
 const moneyLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false,
   message: { error: 'Slow down. Too many requests.' } });
 
@@ -452,7 +460,7 @@ app.get('/api/support/messages', auth, wrap((req,res)=>{
   db.prepare("UPDATE support_messages SET is_read=1 WHERE session_id=? AND sender_role='admin'").run(session.id);
   res.json({session,messages:db.prepare('SELECT id,session_id,sender_role,sender_name,message,is_read,created_at FROM support_messages WHERE session_id=? ORDER BY id').all(session.id)});
 }));
-app.post('/api/support/messages', auth, wrap((req,res)=>{
+app.post('/api/support/messages', auth, sensitiveWriteLimiter, wrap((req,res)=>{
   const message=String((req.body||{}).message||'').trim(); if(message.length<1||message.length>2000) throw httpErr(400,'Enter a message up to 2,000 characters.');
   let session=db.prepare('SELECT * FROM support_sessions WHERE user_id=?').get(req.user.id), t=now();
   if(!session){const id=db.prepare("INSERT INTO support_sessions (user_id,status,created_at,updated_at) VALUES (?,'open',?,?)").run(req.user.id,t,t).lastInsertRowid;session=db.prepare('SELECT * FROM support_sessions WHERE id=?').get(id);}
@@ -461,7 +469,7 @@ app.post('/api/support/messages', auth, wrap((req,res)=>{
   res.status(201).json({ok:true});
 }));
 
-app.post('/api/verification/submit', auth, wrap((req, res) => {
+app.post('/api/verification/submit', auth, sensitiveWriteLimiter, wrap((req, res) => {
   const b = req.body || {};
   const legalName = String(b.legal_name || '').trim();
   const dob = String(b.date_of_birth || '').trim();
@@ -678,6 +686,13 @@ app.post('/api/card/freeze', auth, requireVerified, wrap((req, res) => {
 
 app.get('/api/meta', (req, res) => res.json({ billers: BILLERS, networks: NETWORKS }));
 app.use('/api', (req, res) => fail(res, 404, 'Not found.'));
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  if (err && err.type === 'entity.too.large') return fail(res, 413, 'Request body is too large.');
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) return fail(res, 400, 'Malformed JSON request.');
+  console.error('Unhandled request error:', err && err.message ? err.message : 'unknown');
+  return fail(res, 500, 'Something went wrong. Please try again.');
+});
 
 // ---------- static frontend ----------
 app.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: PROD ? '1h' : 0 }));
