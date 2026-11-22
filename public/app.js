@@ -84,6 +84,25 @@
       '<button type="button" class="muted" style="padding:8px" data-act="go" data-v="' + (reg ? 'login' : 'register') + '">' + (reg ? 'I already have an account' : 'Create a new account') + '</button>' +
       '</form></section>';
   }
+  function compressIdFile(file) {
+    if (!file) return Promise.resolve('');
+    if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size > 12000000) return Promise.reject(new Error('Choose a JPG, PNG or WebP image under 12 MB.'));
+    return new Promise(function(resolve,reject){
+      var url=URL.createObjectURL(file),img=new Image();
+      img.onload=function(){
+        try{
+          var scale=Math.min(1,1100/Math.max(img.width,img.height)),canvas=document.createElement('canvas');
+          canvas.width=Math.max(1,Math.round(img.width*scale));canvas.height=Math.max(1,Math.round(img.height*scale));
+          canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+          var data=canvas.toDataURL('image/jpeg',0.72);URL.revokeObjectURL(url);
+          if(data.length>1450000)reject(new Error('Image is too large after compression. Choose a smaller photo.'));
+          else resolve(data);
+        }catch(e){URL.revokeObjectURL(url);reject(e);}
+      };
+      img.onerror=function(){URL.revokeObjectURL(url);reject(new Error('Could not read the selected image.'));};
+      img.src=url;
+    });
+  }
   function vVerification() {
     var me = S.me, state = me.verification_status || 'pending';
     var heading = state === 'approved' ? 'Identity verified' : state === 'rejected' ? 'Review needed' : state === 'submitted' ? 'Verification in review' : 'Verify your identity';
@@ -101,7 +120,7 @@
       '<label class="field">Legal name<input name="legal_name" required minlength="2" maxlength="100" value="' + esc(me.name) + '" autocomplete="name"></label>' +
       '<label class="field">Date of birth<input name="date_of_birth" type="date" required></label>' +
       '<label class="field">Residential address<textarea name="address" required minlength="8" maxlength="250" rows="3" placeholder="Street, city, state, country"></textarea></label>' +
-      '<label class="field">Government ID type<select name="id_type" required><option value="">Select ID type</option><option>Passport</option><option>Driver license</option><option>National identity card</option><option>Other government ID</option></select></label>' +
+      '<label class="field">Government ID type<select name="id_type" required><option value="">Select ID type</option><option>Passport</option><option>Driver license</option><option>National identity card</option><option>Other government ID</option></select></label>' +\n      '<label class="field">Front of government ID<input name="id_front" type="file" accept="image/jpeg,image/png,image/webp" required></label>' +\n      '<label class="field">Back of ID (if applicable)<input name="id_back" type="file" accept="image/jpeg,image/png,image/webp"></label>' +\n      '<label class="field">Selfie (optional)<input name="selfie" type="file" accept="image/jpeg,image/png,image/webp" capture="user"></label>' +
       '<p class="hint">Do not enter your SSN, ITIN, or full ID number here. An administrator will review your submission and may contact you securely for document checks.</p>' +
       '<p class="err" role="alert"></p><button class="pillbtn w" type="submit">Submit for review</button>' +
       '<button type="button" class="muted" style="padding:8px" data-act="logout">Log out</button></form>') +
@@ -357,7 +376,14 @@
     var p;
     if (kind === 'login') p = api('POST', '/api/auth/login', { email: d.email, password: d.password });
     else if (kind === 'register') p = api('POST', '/api/auth/register', d);
-    else if (kind === 'verification') p = api('POST', '/api/verification/submit', d);
+    else if (kind === 'verification') {
+      var frontFile=form.elements.id_front.files[0],backFile=form.elements.id_back.files[0],selfieFile=form.elements.selfie.files[0];
+      p=Promise.all([compressIdFile(frontFile),compressIdFile(backFile),compressIdFile(selfieFile)]).then(function(images){
+        d.id_front=images[0];d.id_back=images[1];d.selfie=images[2];
+        delete d.id_front_file;delete d.id_back_file;delete d.selfie_file;
+        return api('POST','/api/verification/submit',d);
+      });
+    }
     else if (kind === 'support') p = api('POST', '/api/support/messages', {message:d.message});
     else if (kind === 'goal') {
       var target=Number(d.target), saved=Number(d.saved);
