@@ -187,6 +187,28 @@ app.post('/api/admin/login', authLimiter, wrap((req, res) => {
   res.json({ ok: true });
 }));
 app.post('/api/admin/logout', adminAuth, (req, res) => { res.clearCookie('ptb_admin', { path: '/api' }); res.json({ ok: true }); });
+
+app.post('/api/admin/impersonate/:id', adminAuth, wrap((req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid customer ID.');
+  const user=db.prepare('SELECT id,email,full_name,role,status FROM users WHERE id=?').get(id);
+  if(!user)throw httpErr(404,'Customer not found.');
+  if(user.role==='admin')throw httpErr(400,'You cannot sign in as another administrator.');
+  if(user.status==='suspended')throw httpErr(403,'Reactivate this customer before viewing their account.');
+  issueSession(res,id);
+  const marker=jwt.sign({impersonating:true,adminEmail:req.admin.email,targetId:id},JWT_SECRET,{expiresIn:'4h'});
+  res.cookie('ptb_impersonation',marker,{httpOnly:true,sameSite:'strict',secure:PROD,maxAge:4*3600*1000,path:'/'});
+  auditAdmin(req,'LOGIN_AS_USER',id,null,'Admin opened customer session: '+user.email);
+  res.json({ok:true,user:{id:user.id,email:user.email,full_name:user.full_name}});
+}));
+app.post('/api/admin/impersonate/return', adminAuth, wrap((req,res)=>{
+  const marker=(()=>{try{return jwt.verify(req.cookies.ptb_impersonation||'',JWT_SECRET);}catch{return null;}})();
+  if(marker&&marker.impersonating) auditAdmin(req,'RETURN_FROM_USER_SESSION',Number(marker.targetId),null,'Admin returned from customer session');
+  res.clearCookie('ptb_session',{path:'/'});
+  res.clearCookie('ptb_impersonation',{path:'/'});
+  res.json({ok:true});
+}));
+
 app.get('/api/admin/requests', adminAuth, wrap((req, res) => {
   const status=String(req.query.status||'submitted');
   const rows = db.prepare(`SELECT vr.id, vr.user_id, vr.legal_name, vr.date_of_birth, vr.address, vr.id_type,
@@ -461,6 +483,15 @@ app.post('/api/auth/login', authLimiter, wrap((req, res) => {
 app.post('/api/auth/logout', (req, res) => { res.clearCookie('ptb_session', { path: '/' }); res.json({ ok: true }); });
 
 // ---------- banking routes ----------
+
+app.get('/api/impersonation/status', auth, wrap((req,res)=>{
+  try{
+    const marker=jwt.verify(req.cookies.ptb_impersonation||'',JWT_SECRET);
+    if(marker.impersonating&&Number(marker.targetId)===req.user.id) return res.json({active:true,admin_email:marker.adminEmail});
+  }catch{}
+  res.json({active:false});
+}));
+
 app.get('/api/me', auth, wrap((req, res) => {
   const card = db.prepare('SELECT last4, expiry, frozen FROM cards WHERE account_id = ?').get(req.account.id);
   res.json({
