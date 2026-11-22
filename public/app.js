@@ -220,8 +220,8 @@
     var me=S.me,c=me.card;
     if(!c){
       var status=me.card_request&&me.card_request.status;
-      var copy=status==='pending'?'Your request is waiting for an administrator to review it.':status==='rejected'?'Your previous request was not approved. You can submit a new request.':'Request a card for your account. An administrator will review it before issuing a demo card.';
-      return '<section class="screen">'+pageHead('Your card','Request and manage your demo card')+'<div class="panel card-request-panel"><div class="card-request-icon">'+ic('detail')+'</div><h2>No card issued</h2><p class="lead">'+esc(copy)+'</p>'+(status==='pending'?'<span class="status-chip">Awaiting admin approval</span>':'<button class="pillbtn w" data-act="request-card">'+(status==='rejected'?'Request again':'Request a card')+'</button>')+'<p class="hint">Cards are demo-only and are issued manually after your request. No real payment card is created.</p></div></section>'+dock('card');
+      var copy=status==='pending'?'Your request is waiting for an administrator to review it.':status==='rejected'?'Your previous request was not approved. You can submit a new request.':'Request a card for your account. An administrator will review your card request.';
+      return '<section class="screen">'+pageHead('Your card','Request and manage your card')+'<div class="panel card-request-panel"><div class="card-request-icon">'+ic('detail')+'</div><h2>No card issued</h2><p class="lead">'+esc(copy)+'</p>'+(status==='pending'?'<span class="status-chip">Awaiting admin approval</span>':'<button class="pillbtn w" data-act="request-card">'+(status==='rejected'?'Request again':'Request a card')+'</button>')+'<p class="hint">Your card will be issued after your request is approved.</p></div></section>'+dock('card');
     }
     var outs=S.txs.filter(function(t){return t.amount<0;}).slice(0,3).map(txRow).join('')||'<p class="empty">No card activity yet.</p>';
     return '<section class="screen"><div class="hd"><button class="circ" data-act="go" data-v="home" aria-label="Back">'+ic('back')+'</button><h4>Manage card</h4><span></span></div>'+
@@ -234,7 +234,7 @@
       '<label class="field"><span><input style="width:auto" type="checkbox" name="international_enabled" '+(c.international_enabled?'checked':'')+'> International purchases</span></label>'+
       '<label class="field">Daily card limit (USD)<input name="daily_limit" type="number" min="100" max="100000" step=".01" value="'+(c.daily_limit/100)+'" required></label>'+
       '<label class="field">Transaction PIN<input name="transaction_pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label>'+
-      '<p class="hint">Demo card controls only. No real card network or authorization processor is connected.</p><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Save card controls</button></form></div>'+
+      '<p class="hint">Manage your card security and usage controls.</p><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Save card controls</button></form></div>'+
       '<div class="sub">Card PIN</div><div class="panel"><form class="form" data-form="card-pin"><label class="field">New card PIN<input name="card_pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label><label class="field">Confirm with transaction PIN<input name="transaction_pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label><p class="err" role="alert"></p><button class="pillbtn d" type="submit">'+(c.card_pin_set?'Change card PIN':'Set card PIN')+'</button></form></div>'+
       '<div class="trh"><b>Recent Transactions</b><button data-act="go" data-v="history">View all</button></div>'+outs+'</section>'+dock('card');
   }
@@ -335,15 +335,15 @@
   }
 
     function sCardReplace(){
-    return sheetWrap('Replace demo card','<p class="lead">Replacing will create a new demo card number ending and require activation and a new card PIN.</p><form class="form" data-form="card-replace"><label class="field">Transaction PIN<input name="transaction_pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label><p class="err" role="alert"></p><button class="pillbtn d" type="submit">Replace card</button></form>');
+    return sheetWrap('Replace card','<p class="lead">Replacing your card will issue a new card number and require activation and a new card PIN.</p><form class="form" data-form="card-replace"><label class="field">Transaction PIN<input name="transaction_pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label><p class="err" role="alert"></p><button class="pillbtn d" type="submit">Replace card</button></form>');
   }
   function sMfaDisable(){
     return sheetWrap('Disable sign-in verification','<form class="form" data-form="mfa-disable"><p class="lead">Confirm your password and transaction PIN to turn off this protection.</p><label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label><label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label><p class="err" role="alert"></p><button class="pillbtn d" type="submit">Disable MFA</button></form>');
   }
   function sDetails() {
     var me=S.me, c=S.cardReveal;
-    if(!c) return sheetWrap('Reveal card details','<p class="lead">Enter your transaction PIN to view your complete demo card information, including the CVV.</p><form class="form" data-form="card-reveal"><label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" autocomplete="off" required></label><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Verify PIN & reveal</button></form><p class="hint">Card details stay hidden until your PIN is verified.</p>');
-    return sheetWrap('Card details','<div class="kv"><span>Card holder</span><b>'+esc(me.name)+'</b></div><div class="kv"><span>Card number</span><b class="card-secret">'+esc(c.number)+'</b></div><div class="kv"><span>Expires</span><b>'+esc(c.expiry)+'</b></div><div class="kv"><span>CVV</span><b class="card-secret">'+esc(c.cvv)+'</b></div><div class="kv"><span>Status</span><b>'+(me.card.frozen?'Frozen':'Active')+'</b></div><div class="kv"><span>Linked account</span><b>'+esc(me.account.number)+'</b></div><p class="hint">Synthetic demo card details only; not a real payment card.</p><button class="pillbtn d" data-act="hide-card-details">Hide card details</button>');
+    if(!c) return sheetWrap('Reveal card details','<p class="lead">Enter your transaction PIN to view your complete card information, including the CVV.</p><form class="form" data-form="card-reveal"><label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" autocomplete="off" required></label><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Verify PIN & reveal</button></form><p class="hint">Card details stay hidden until your PIN is verified.</p>');
+    return sheetWrap('Card details','<div class="kv"><span>Card holder</span><b>'+esc(me.name)+'</b></div><div class="kv"><span>Card number</span><b class="card-secret">'+esc(c.number)+'</b></div><div class="kv"><span>Expires</span><b>'+esc(c.expiry)+'</b></div><div class="kv"><span>CVV</span><b class="card-secret">'+esc(c.cvv)+'</b></div><div class="kv"><span>Status</span><b>'+(me.card.frozen?'Frozen':'Active')+'</b></div><div class="kv"><span>Linked account</span><b>'+esc(me.account.number)+'</b></div><p class="hint">Keep your card details private. Hide them when finished.</p><button class="pillbtn d" data-act="hide-card-details">Hide card details</button>');
   }
   function sProfile() {
     var me = S.me;
@@ -469,7 +469,7 @@
     if (a === 'return-admin') { if(!confirm('End this customer session and return to the admin console?'))return; api('POST','/api/admin/impersonate-return',{}).then(function(){window.location.href='/api/admin/portal';}).catch(function(e){toast(e.message);}); return; }
     if (a === 'sheet') { if(t.dataset.s==='details')S.cardReveal=null; return openSheet(t.dataset.s); }
     if (a === 'hide-card-details') { S.cardReveal=null; S.sheet='details'; render(); return; }
-    if (a === 'request-card') { if(!confirm('Submit a request for a demo card? An administrator must approve it first.'))return; t.disabled=true; api('POST','/api/card/request',{}).then(function(){return load();}).then(function(){S.view='card';render();toast('Card request submitted');}).catch(function(e){t.disabled=false;toast(e.message);}); return; }
+    if (a === 'request-card') { if(!confirm('Request a card? An administrator must approve it first.'))return; t.disabled=true; api('POST','/api/card/request',{}).then(function(){return load();}).then(function(){S.view='card';render();toast('Card request submitted');}).catch(function(e){t.disabled=false;toast(e.message);}); return; }
     if (a === 'goal') return openSheet('goal');
     if (a === 'clear-goal') { S.goal=null; try{localStorage.removeItem('ptb_goal');}catch(_){} S.sheet=null; S.view='savings'; return render(); }
     if (a === 'close') { S.sheet = null; S.cardReveal=null; return render(); }
@@ -581,7 +581,7 @@
       if (kind === 'card-reveal') { S.cardReveal=res.card; S.sheet='details'; render(); return; }
       if (kind === 'card-settings') return load().then(function(){S.view='card';render();toast('Card controls updated');});
       if (kind === 'card-pin') return load().then(function(){S.view='card';render();toast('Card PIN saved');});
-      if (kind === 'card-replace') return load().then(function(){S.sheet=null;S.view='card';render();toast('Demo card replaced. Activate it and set a new PIN.');});
+      if (kind === 'card-replace') return load().then(function(){S.sheet=null;S.view='card';render();toast('Card replaced. Activate it and set a new PIN.');});
       if (kind === 'mfa-login') { mfaChallengeId='';return load().then(function(){S.view=S.me.verification_status==='approved'?'home':'verification';render();toast('Signed in securely');}); }
       if (kind === 'mfa-setup') { mfaChallengeId='';return load().then(function(){S.view='security';render();toast('Multi-factor authentication enabled');}); }
       if (kind === 'mfa-disable') return load().then(function(){S.sheet=null;S.view='security';render();toast('Multi-factor authentication disabled');});
