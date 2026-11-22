@@ -25,7 +25,7 @@
   var goalData = null; try { goalData = JSON.parse(localStorage.getItem('ptb_goal') || 'null'); } catch (_) {}
   var resetToken = new URLSearchParams(window.location.search).get('reset') || '';
   var mfaChallengeId = '';
-  var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], sessions: [], impersonation: { active: false } };
+  var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, selectedTx: null, statementFrom: '', statementTo: '', transferDraft: null, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], sessions: [], impersonation: { active: false } };
 
   // ---------- api ----------
   function api(method, url, body, idem) {
@@ -56,9 +56,9 @@
   function txRow(t) {
     var neg = t.amount < 0;
     var title = t.type === 'transfer_out' ? 'To ' + t.counterparty : t.type === 'transfer_in' ? 'From ' + t.counterparty : t.counterparty;
-    return '<div class="tr"><div class="ti">' + ic(ICON[t.type] || 'swap') + '</div>' +
-      '<div class="m"><b>' + esc(title) + '</b><small>' + esc(LABEL[t.type] || 'Payment') + ' · ' + esc(fdate(t.created_at)) + (t.note ? ' · ' + esc(t.note) : '') + '</small></div>' +
-      '<div class="r"><b style="color:' + (neg ? 'var(--fg)' : 'var(--good)') + '">' + (neg ? '-' : '+') + money(Math.abs(t.amount)) + ' USD</b><small>Successful</small></div></div>';
+    return '<button type="button" class="tr tx-click" data-act="transaction" data-id="' + esc(t.id) + '" aria-label="View transaction details: ' + esc(title) + '"><span class="ti">' + ic(ICON[t.type] || 'swap') + '</span>' +
+      '<span class="m"><b>' + esc(title) + '</b><small>' + esc(LABEL[t.type] || 'Payment') + ' · ' + esc(fdate(t.created_at)) + (t.note ? ' · ' + esc(t.note) : '') + '</small></span>' +
+      '<span class="r"><b style="color:' + (neg ? 'var(--fg)' : 'var(--good)') + '">' + (neg ? '-' : '+') + money(Math.abs(t.amount)) + ' USD</b><small>Successful</small></span>' + ic('chev') + '</button>';
   }
   var artCard = '<svg class="art" viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice"><use href="#art"/></svg>';
 
@@ -192,9 +192,29 @@
       '<div class="sub">Recent recipients</div><div class="benes">'+benes+'</div><div class="trh"><b>Recent activity</b><button data-act="go" data-v="history">View all</button></div>'+trs+'</section>'+dock('home');
   }
   function vHistory() {
-    var trs = S.txs.map(txRow).join('') || '<p class="empty">No transactions yet.</p>';
+    var from=S.statementFrom,to=S.statementTo;
+    var filtered=S.txs.filter(function(t){var day=String(t.created_at||'').slice(0,10);return (!from||day>=from)&&(!to||day<=to);});
+    var trs = filtered.map(txRow).join('') || '<p class="empty">No transactions match this date range.</p>';
     return '<section class="screen">' + 
-      '<div class="hd"><button class="circ" data-act="go" data-v="home" aria-label="Back">' + ic('back') + '</button><h4>Activity</h4><button class="copy" data-act="statement">Export</button></div><label class="field" style="margin:8px 0 14px">Search transactions<input data-search type="search" placeholder="Search activity"></label>' + trs + '</section>' + dock('history');
+      '<div class="hd"><button class="circ" data-act="go" data-v="home" aria-label="Back">' + ic('back') + '</button><h4>Activity</h4><button class="copy" data-act="statement">Export</button></div>'+
+      '<div class="panel statement-filter"><label class="field">From<input type="date" data-statement-from value="'+esc(from)+'"></label><label class="field">To<input type="date" data-statement-to value="'+esc(to)+'"></label><button class="pillbtn d" data-act="clear-statement">Clear dates</button></div>'+
+      '<label class="field" style="margin:8px 0 14px">Search transactions<input data-search type="search" placeholder="Search activity"></label><p class="hint">'+filtered.length+' transaction'+(filtered.length===1?'':'s')+' in range</p>' + trs + '</section>' + dock('history');
+  }
+  function vTransaction() {
+    var t=S.selectedTx;if(!t)return '<section class="screen"><p class="empty">Transaction not found.</p><button class="pillbtn d" data-act="go" data-v="history">Back to activity</button></section>';
+    var incoming=t.amount>=0, title=t.type==='transfer_out'?'Transfer sent':t.type==='transfer_in'?'Transfer received':t.type==='deposit'?'Deposit':t.type==='airtime'?'Airtime purchase':'Bill payment';
+    var receipt=[ 'PRIME TRUST BANK — TRANSACTION RECEIPT','',title,'Amount: '+(incoming?'+':'-')+' USD '+money(Math.abs(t.amount)),'Status: '+esc(t.status||'Successful'),'Date: '+new Date(t.created_at).toLocaleString(),'Description: '+(t.counterparty||'—'),'Reference: '+(t.reference||t.id||'—'),t.note?'Note: '+t.note:'','This is a demo banking receipt.'];
+    return '<section class="screen"><div class="hd"><button class="circ" data-act="go" data-v="history" aria-label="Back">'+ic('back')+'</button><h4>Transaction details</h4><span></span></div>'+
+      '<div class="panel receipt-hero"><div class="receipt-mark">'+ic(incoming?'down':'up')+'</div><small>'+esc(title)+'</small><strong class="receipt-amount">'+(incoming?'+':'−')+' USD '+money(Math.abs(t.amount))+'</strong><span class="status-chip">'+esc(t.status||'Successful')+'</span></div>'+
+      '<div class="panel receipt-details"><div class="kv"><span>Recipient / sender</span><b>'+esc(t.counterparty||'—')+'</b></div><div class="kv"><span>Transaction type</span><b>'+esc(LABEL[t.type]||t.type||'Payment')+'</b></div><div class="kv"><span>Date & time</span><b>'+esc(new Date(t.created_at).toLocaleString())+'</b></div><div class="kv"><span>Reference</span><b>'+esc(t.reference||t.id||'—')+'</b></div>'+(t.note?'<div class="kv"><span>Note</span><b>'+esc(t.note)+'</b></div>':'')+'</div>'+
+      '<button class="pillbtn w" style="margin-top:14px" data-act="receipt-download">Download receipt</button><button class="pillbtn d" style="margin-top:10px" data-act="go" data-v="disputes">Report an issue</button></section>'+dock('history');
+  }
+  function vProfile() {
+    var me=S.me;
+    return '<section class="screen">'+pageHead('Personal profile','Your account identity and contact details')+
+      '<div class="panel profile-hero">'+avatar(me.name)+'<h2>'+esc(me.name)+'</h2><p>'+esc(me.email)+'</p><span class="status-chip">'+esc(me.verification_status||'KYC pending')+'</span></div>'+
+      '<div class="panel receipt-details"><div class="kv"><span>Full name</span><b>'+esc(me.name)+'</b></div><div class="kv"><span>Email address</span><b>'+esc(me.email)+'</b></div><div class="kv"><span>Account number</span><b>'+esc(me.account.number)+'</b></div><div class="kv"><span>Account currency</span><b>'+esc(me.account.currency||'USD')+'</b></div><div class="kv"><span>Identity status</span><b>'+esc(me.verification_status||'pending')+'</b></div></div>'+
+      '<div class="sub">Account preferences</div><div class="panel">'+pageLink('security','user','Security & sign-in','Password, MFA and account protection')+pageLink('verification','detail','Identity verification','Review your KYC status')+pageLink('notifications','bell','Notifications','View account alerts')+pageLink('sessions','user','Devices & sessions','Manage signed-in devices')+'</div><p class="hint" style="margin-top:12px">Personal detail editing is not enabled in this demo yet. Contact support to request a correction.</p></section>'+dock('profile');
   }
   function vCard() {
     var me=S.me,c=me.card;
@@ -254,7 +274,7 @@
     return '<section class="screen">'+pageHead('Profile & security','Manage your account details')+
       '<div class="panel"><div class="hrow">'+avatar(me.name)+'<div><b>'+esc(me.name)+'</b><small>'+esc(me.email)+'</small></div></div><div class="kv"><span>Account number</span><b>'+esc(me.account.number)+'</b></div><div class="kv"><span>Identity verification</span><b>'+esc(me.verification_status||'pending')+'</b></div></div>'+
       '<div class="sub">Sign-in security</div><div class="panel"><div class="hrow"><div><b>Multi-factor authentication</b><small>'+(me.mfa_enabled?'Enabled · email code required at sign-in':'Add an email code at sign-in')+'</small></div><div class="sp"></div><button class="copy" data-act="'+(me.mfa_enabled?'mfa-disable':'mfa-start')+'">'+(me.mfa_enabled?'Disable':'Enable')+'</button></div></div>' +
-      '<div class="sub">Account controls</div><div class="panel">'+pageLink('accounts','detail','Account details','View account number and balance')+pageLink('card','detail','Card controls','Freeze or unfreeze your card')+pageLink('verification','user','Identity verification','View or submit identity details')+pageLink('support','headset','Support chat','Message Prime Trust support')+pageLink('services','dots','More banking','Account tools and service requests')+pageLink('sessions','user','Devices & sessions','Review and revoke signed-in devices')+'</div>'+
+      '<div class="sub">Account controls</div><div class="panel">'+pageLink('profile','user','Personal profile','View your personal and account details')+pageLink('accounts','detail','Account details','View account number and balance')+pageLink('card','detail','Card controls','Freeze or unfreeze your card')+pageLink('verification','user','Identity verification','View or submit identity details')+pageLink('support','headset','Support chat','Message Prime Trust support')+pageLink('services','dots','More banking','Account tools and service requests')+pageLink('sessions','user','Devices & sessions','Review and revoke signed-in devices')+'</div>'+
       '<button class="pillbtn d" style="margin-top:14px" data-act="logout">Log out</button></section>'+dock('profile');
   }
   function vSupport() {
@@ -399,6 +419,8 @@
       case 'security': html = vSecurity(); break;
       case 'support': html = vSupport(); break;
       case 'history': html = vHistory(); break;
+      case 'transaction-detail': html = vTransaction(); break;
+      case 'profile': html = vProfile(); break;
       case 'card': html = vCard(); break;
       case 'services': html = vServices(); break;
       case 'notifications': html = vNotifications(); break;
@@ -439,6 +461,9 @@
     var a = t.dataset.act;
     if (a === 'closebg') { if (ev.target === t) { S.sheet = null; render(); } return; }
     if (a === 'go') return go(t.dataset.v);
+    if (a === 'transaction') { S.selectedTx=S.txs.find(function(x){return String(x.id)===String(t.dataset.id);})||null; return go('transaction-detail'); }
+    if (a === 'clear-statement') { S.statementFrom='';S.statementTo='';return render(); }
+    if (a === 'receipt-download') { if(!S.selectedTx)return; var q=S.selectedTx, amount=(q.amount>=0?'+':'-')+' USD '+money(Math.abs(q.amount)); var body='PRIME TRUST BANK\nTRANSACTION RECEIPT\n\nAmount: '+amount+'\nStatus: '+(q.status||'Successful')+'\nDate: '+new Date(q.created_at).toLocaleString()+'\nDescription: '+(q.counterparty||'—')+'\nReference: '+(q.reference||q.id||'—')+'\n'+(q.note?'Note: '+q.note+'\n':'')+'\nDemo receipt — not a proof of real funds.'; var blob=new Blob([body],{type:'text/plain;charset=utf-8'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='prime-trust-receipt-'+String(q.id||'transaction')+'.txt';link.click();setTimeout(function(){URL.revokeObjectURL(url);},1000);toast('Receipt downloaded');return; }
     if (a === 'refresh-support') return go('support');
     if (a === 'return-admin') { if(!confirm('End this customer session and return to the admin console?'))return; api('POST','/api/admin/impersonate-return',{}).then(function(){window.location.href='/api/admin/portal';}).catch(function(e){toast(e.message);}); return; }
     if (a === 'sheet') return openSheet(t.dataset.s);
@@ -469,7 +494,7 @@
       return;
     }
     if (a === 'addfunds') return openSheet('fund');
-    if (a === 'statement') { var rows = [['Date','Type','Description','Amount USD','Balance USD']].concat(S.txs.map(function (t) { return [new Date(t.created_at).toISOString(),t.type,t.counterparty,(t.amount/100).toFixed(2),(t.balance_after/100).toFixed(2)]; })); var csv = rows.map(function (row) { return row.map(function (v) { return '"' + String(v).replace(/"/g,'""') + '"'; }).join(','); }).join(String.fromCharCode(13,10)); var blob = new Blob([csv],{type:'text/csv;charset=utf-8'}), url = URL.createObjectURL(blob), link = document.createElement('a'); link.href=url; link.download='prime-trust-statement.csv'; link.click(); URL.revokeObjectURL(url); toast('Statement exported'); return; }
+    if (a === 'statement') { var rows = [['Date','Type','Description','Amount USD','Balance USD']].concat(S.txs.filter(function(t){var day=String(t.created_at||'').slice(0,10);return (!S.statementFrom||day>=S.statementFrom)&&(!S.statementTo||day<=S.statementTo);}).map(function (t) { return [new Date(t.created_at).toISOString(),t.type,t.counterparty,(t.amount/100).toFixed(2),(t.balance_after/100).toFixed(2)]; })); var csv = rows.map(function (row) { return row.map(function (v) { return '"' + String(v).replace(/"/g,'""') + '"'; }).join(','); }).join(String.fromCharCode(13,10)); var blob = new Blob([csv],{type:'text/csv;charset=utf-8'}), url = URL.createObjectURL(blob), link = document.createElement('a'); link.href=url; link.download='prime-trust-statement.csv'; link.click(); URL.revokeObjectURL(url); toast('Statement exported'); return; }
     if (a === 'testfunds') {
       api('POST', '/api/deposit', { amount: 500 }, uuid()).then(function () { return done('USD 500.00 test funds added'); }).catch(function (e) { toast(e.message); });
       return;
@@ -486,6 +511,8 @@
 
   app.addEventListener('input', function (ev) {
     if (ev.target.name === 'to_account') lookup(ev.target.value.trim());
+    if (ev.target.matches('[data-statement-from]')) { S.statementFrom=ev.target.value;render(); }
+    if (ev.target.matches('[data-statement-to]')) { S.statementTo=ev.target.value;render(); }
   });
 
   app.addEventListener('submit', function (ev) {
