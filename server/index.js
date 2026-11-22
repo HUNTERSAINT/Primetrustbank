@@ -916,7 +916,7 @@ app.get('/api/admin/portal', adminAuth, (req, res) => {
   if (!ADMIN_PORTAL_PATH_VALID) return fail(res, 404, 'Not found.');
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.html'), 'utf8');
   const scriptPath = ADMIN_PORTAL_PATH + '.js';
-  const securedHtml = html.replace(/src="\\/admin\\.js[^"]*"/, 'src="' + scriptPath + '?v=secure-admin-04"');
+  const securedHtml = html.replace(new RegExp('src="/admin\\.js[^"]*"'), 'src="' + scriptPath + '?v=secure-admin-04"');
   res.set('Cache-Control', 'no-store, private');
   res.type('html').send(securedHtml);
 });
@@ -1057,7 +1057,7 @@ if (ADMIN_PORTAL_PATH_VALID) {
   app.get(ADMIN_PORTAL_PATH, (req, res) => {
     const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.html'), 'utf8');
     const scriptPath = ADMIN_PORTAL_PATH + '.js';
-    const securedHtml = html.replace(/src="\\/admin\\.js[^"]*"/, 'src="' + scriptPath + '?v=secure-admin-04"');
+  const securedHtml = html.replace(new RegExp('src="/admin\\.js[^"]*"'), 'src="' + scriptPath + '?v=secure-admin-04"');
     res.set('Cache-Control', 'no-store, private');
     res.type('html').send(securedHtml);
   });
