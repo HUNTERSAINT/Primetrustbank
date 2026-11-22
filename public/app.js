@@ -594,7 +594,7 @@
       S.sheet=null; S.view='savings'; render(); toast('Savings goal saved'); return;
     }
     else if (kind === 'send-review') { api('GET','/api/accounts/lookup/'+encodeURIComponent(d.to_account)).then(function(rec){S.transferDraft={to_account:d.to_account,amount:d.amount,note:d.note,recipient:rec.name};S.sheet='send-confirm';render();}).catch(function(e){busy(form,false);setErr(form,e.message);});return; }
-    else if (kind === 'send-confirm') p = api('POST', '/api/transfers', { to_account: S.transferDraft.to_account, amount: S.transferDraft.amount, pin: d.pin, note: S.transferDraft.note }, S.idem);\n    else if (kind === 'external-transfer') p = api('POST','/api/external-transfers',{bank_name:d.bank_name,account_name:d.account_name,account_number:d.account_number,amount:d.amount,pin:d.pin,note:d.note},S.idem);
+    else if (kind === 'send-confirm') p = api('POST', '/api/transfers', { to_account: S.transferDraft.to_account, amount: S.transferDraft.amount, pin: d.pin, note: S.transferDraft.note }, S.idem);\n    else if (kind === 'external-transfer') { S.idem=uuid(); p = api('POST','/api/external-transfers',{bank_name:d.bank_name,account_name:d.account_name,account_number:d.account_number,amount:d.amount,pin:d.pin,note:d.note},S.idem); }
     else if (kind === 'bills') p = api('POST', '/api/bills', { biller: d.biller, reference: d.reference, amount: d.amount, pin: d.pin }, S.idem);
     else return;
     p.then(function (res) {
