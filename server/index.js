@@ -13,18 +13,25 @@ const PORT = process.env.PORT || 3000;
 const SANDBOX_FUNDING = process.env.ALLOW_SANDBOX_FUNDING !== 'false';
 const SESSION_HOURS = 8;
 const ADMIN_SESSION_HOURS = 4;
-if (PROD && Buffer.byteLength(JWT_SECRET || '') < 32) { console.error('JWT_SECRET must contain at least 32 bytes in production'); process.exit(1); }
-const KYC_ENCRYPTION_KEY = process.env.KYC_ENCRYPTION_KEY
-  ? ( /^[a-f0-9]{64}$/i.test(process.env.KYC_ENCRYPTION_KEY) ? Buffer.from(process.env.KYC_ENCRYPTION_KEY, 'hex') : null )
-  : crypto.createHash('sha256').update('prime-trust-kyc-v1:' + JWT_SECRET).digest();
-if (!KYC_ENCRYPTION_KEY) { console.error('KYC_ENCRYPTION_KEY must be 64 hexadecimal characters'); process.exit(1); }
-const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 10);
 
 let JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
   if (PROD) { console.error('JWT_SECRET must be set in production'); process.exit(1); }
-  JWT_SECRET = crypto.randomBytes(32).toString('hex'); // dev only: sessions reset on restart
+  JWT_SECRET = crypto.randomBytes(32).toString('hex'); // development only
 }
+if (PROD && Buffer.byteLength(JWT_SECRET) < 32) {
+  console.error('JWT_SECRET must contain at least 32 bytes in production');
+  process.exit(1);
+}
+
+const KYC_ENCRYPTION_KEY = process.env.KYC_ENCRYPTION_KEY
+  ? (/^[a-f0-9]{64}$/i.test(process.env.KYC_ENCRYPTION_KEY) ? Buffer.from(process.env.KYC_ENCRYPTION_KEY, 'hex') : null)
+  : crypto.createHash('sha256').update('prime-trust-kyc-v1:' + JWT_SECRET).digest();
+if (!KYC_ENCRYPTION_KEY) {
+  console.error('KYC_ENCRYPTION_KEY must be 64 hexadecimal characters');
+  process.exit(1);
+}
+const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 10);
 
 const app = express();
 app.set('trust proxy', 1); // Railway's single trusted edge proxy
@@ -237,24 +244,38 @@ app.post('/api/admin/login', adminLoginLimiter, wrap((req, res) => {
 app.post('/api/admin/logout', adminAuth, (req, res) => { db.prepare('UPDATE admin_sessions SET revoked_at=? WHERE jti=? AND revoked_at IS NULL').run(now(),req.admin.jti); auditAdmin(req,'ADMIN_LOGOUT',null,null,'Administrator signed out'); res.clearCookie('ptb_admin', { path: '/api' }); res.json({ ok: true }); });
 
 app.post('/api/admin/impersonate/:id', adminAuth, wrap((req,res)=>{
-  const id=Number(req.params.id);
-  if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid customer ID.');
-  const user=db.prepare('SELECT id,email,full_name,role,status FROM users WHERE id=?').get(id);
-  if(!user)throw httpErr(404,'Customer not found.');
-  if(user.role==='admin')throw httpErr(400,'You cannot sign in as another administrator.');
-  if(user.status==='suspended')throw httpErr(403,'Reactivate this customer before viewing their account.');
-  issueSession(res,id);
-  const marker=jwt.sign({impersonating:true,adminEmail:req.admin.email,targetId:id},JWT_SECRET,{expiresIn:'4h'});
-  res.cookie('ptb_impersonation',marker,{httpOnly:true,sameSite:'strict',secure:PROD,maxAge:4*3600*1000,path:'/'});
-  auditAdmin(req,'LOGIN_AS_USER',id,null,'Admin opened customer session: '+user.email);
-  res.json({ok:true,user:{id:user.id,email:user.email,full_name:user.full_name}});
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) throw httpErr(400, 'Invalid customer ID.');
+  const user = db.prepare('SELECT id,email,full_name,status FROM users WHERE id=?').get(id);
+  if (!user) throw httpErr(404, 'Customer not found.');
+  const configuredAdminEmail = String(process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+  if (user.email.toLowerCase() === configuredAdminEmail) throw httpErr(400, 'You cannot sign in as an administrator.');
+  if (user.status === 'suspended') throw httpErr(403, 'Reactivate this customer before viewing their account.');
+
+  issueSession(res, id);
+  const marker = jwt.sign({
+    impersonating: true,
+    adminEmail: req.admin.email,
+    adminJti: req.admin.jti,
+    targetId: id
+  }, JWT_SECRET, { expiresIn: '4h' });
+  res.cookie('ptb_impersonation', marker, {
+    httpOnly: true, sameSite: 'strict', secure: PROD, maxAge: 4 * 3600 * 1000, path: '/'
+  });
+  auditAdmin(req, 'LOGIN_AS_USER', id, null, 'Admin opened customer session: ' + user.email);
+  res.json({ ok: true, user: { id: user.id, email: user.email, full_name: user.full_name } });
 }));
+
 app.post('/api/admin/impersonate-return', adminAuth, wrap((req,res)=>{
-  const marker=(()=>{try{return jwt.verify(req.cookies.ptb_impersonation||'',JWT_SECRET);}catch{return null;}})();
-  if(marker&&marker.impersonating) auditAdmin(req,'RETURN_FROM_USER_SESSION',Number(marker.targetId),null,'Admin returned from customer session');
-  res.clearCookie('ptb_session',{path:'/'});
-  res.clearCookie('ptb_impersonation',{path:'/'});
-  res.json({ok:true});
+  let marker = null;
+  try { marker = jwt.verify(req.cookies.ptb_impersonation || '', JWT_SECRET); } catch {}
+  if (!marker || !marker.impersonating || marker.adminJti !== req.admin.jti || marker.adminEmail !== req.admin.email) {
+    throw httpErr(403, 'This administrator session cannot return from the current customer view.');
+  }
+  auditAdmin(req, 'RETURN_FROM_USER_SESSION', Number(marker.targetId), null, 'Admin returned from customer session');
+  res.clearCookie('ptb_session', { path: '/' });
+  res.clearCookie('ptb_impersonation', { path: '/' });
+  res.json({ ok: true });
 }));
 
 app.get('/api/admin/requests', adminAuth, wrap((req, res) => {
@@ -492,28 +513,52 @@ app.post('/api/verification/submit', auth, sensitiveWriteLimiter, wrap((req, res
 }));
 
 app.post('/api/auth/register', authLimiter, wrap((req, res) => {
-  const { email, password, full_name, pin } = req.body || {};
-  const em = String(email || '').trim().toLowerCase();
-  const name = String(full_name || '').trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em) || em.length > 120) throw httpErr(400, 'Enter a valid email address.');
+  const b = req.body || {};
+  const em = String(b.email || '').trim().toLowerCase();
+  const name = String(b.full_name || '').trim();
+  const legalName = String(b.legal_name || '').trim();
+  const dob = String(b.date_of_birth || '').trim();
+  const address = String(b.address || '').trim();
+  const idType = String(b.id_type || '').trim();
+  const front = String(b.id_front || '');
+  const back = String(b.id_back || '');
+  const selfie = String(b.selfie || '');
+  const password = b.password;
+  const pin = b.pin;
+
+  if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(em) || em.length > 120) throw httpErr(400, 'Enter a valid email address.');
   if (name.length < 2 || name.length > 80) throw httpErr(400, 'Enter your full name.');
   if (typeof password !== 'string' || password.length < 12 || Buffer.byteLength(password, 'utf8') > 72) throw httpErr(400, 'Password must be at least 12 characters and no more than 72 UTF-8 bytes.');
-  if (typeof pin !== 'string' || !/^\d{4}$/.test(pin)) throw httpErr(400, 'Transaction PIN must be 4 digits.');
+  if (typeof pin !== 'string' || !/^\\d{4}$/.test(pin)) throw httpErr(400, 'Transaction PIN must be 4 digits.');
+  if (legalName.length < 2 || legalName.length > 100) throw httpErr(400, 'Enter your legal name.');
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(dob) || Number.isNaN(Date.parse(dob)) || new Date(dob + 'T00:00:00Z').toISOString().slice(0,10) !== dob) throw httpErr(400, 'Enter a valid date of birth.');
+  if (dob > new Date().toISOString().slice(0,10)) throw httpErr(400, 'Date of birth cannot be in the future.');
+  if (address.length < 8 || address.length > 250) throw httpErr(400, 'Enter your residential address.');
+  if (!['Passport','Driver license','National identity card','Other government ID'].includes(idType)) throw httpErr(400, 'Choose a valid ID type.');
+  const validImage = (value, required) => {
+    if (!value) return !required;
+    if (value.length > 1500000 || !/^data:image\\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) return false;
+    const data = value.slice(value.indexOf(',') + 1);
+    return data.length > 0 && Buffer.from(data, 'base64').length <= 1100000;
+  };
+  if (!validImage(front, true) || !validImage(back, false) || !validImage(selfie, false)) throw httpErr(400, 'Upload a clear ID photo. Each image must be JPG, PNG or WebP and under 1.1 MB after compression.');
   if (db.prepare('SELECT 1 FROM users WHERE email = ?').get(em)) throw httpErr(409, 'An account with this email already exists.');
 
-  const ph = bcrypt.hashSync(password, 12), pinh = bcrypt.hashSync(pin, 12);
+  const ph = bcrypt.hashSync(password, 12), pinh = bcrypt.hashSync(pin, 12), submittedAt = now();
   const userId = db.transaction(() => {
-    const u = db.prepare('INSERT INTO users (email, full_name, password_hash, pin_hash, created_at) VALUES (?,?,?,?,?)')
-      .run(em, name, ph, pinh, now()).lastInsertRowid;
+    const u = db.prepare("INSERT INTO users (email, full_name, password_hash, pin_hash, verification_status, verification_submitted_at, created_at) VALUES (?,?,?,?, 'submitted', ?, ?)")
+      .run(em, name, ph, pinh, submittedAt, submittedAt).lastInsertRowid;
     const a = db.prepare("INSERT INTO accounts (user_id, account_number, kind) VALUES (?,?, 'user')")
       .run(u, newAccountNumber()).lastInsertRowid;
     const exp = new Date(); exp.setFullYear(exp.getFullYear() + 4);
     db.prepare('INSERT INTO cards (account_id, last4, expiry) VALUES (?,?,?)')
       .run(a, cardNumber(), String(exp.getMonth() + 1).padStart(2, '0') + '/' + String(exp.getFullYear()).slice(2));
+    db.prepare("INSERT INTO verification_requests (user_id, legal_name, date_of_birth, address, id_type, review_status, submitted_at, id_front_data, id_back_data, selfie_data) VALUES (?,?,?,?,?,'submitted',?,?,?,?)")
+      .run(u, legalName, dob, address, idType, submittedAt, sealKyc(front), sealKyc(back || null), sealKyc(selfie || null));
     return u;
   })();
   issueSession(res, Number(userId));
-  res.status(201).json({ ok: true });
+  res.status(201).json({ ok: true, verification_status: 'submitted' });
 }));
 
 app.post('/api/auth/login', authLimiter, wrap((req, res) => {
@@ -544,11 +589,16 @@ app.post('/api/auth/logout', (req, res) => {
 // ---------- banking routes ----------
 
 app.get('/api/impersonation/status', auth, wrap((req,res)=>{
-  try{
-    const marker=jwt.verify(req.cookies.ptb_impersonation||'',JWT_SECRET);
-    if(marker.impersonating&&Number(marker.targetId)===req.user.id) return res.json({active:true,admin_email:marker.adminEmail});
-  }catch{}
-  res.json({active:false});
+  try {
+    const marker = jwt.verify(req.cookies.ptb_impersonation || '', JWT_SECRET);
+    if (marker.impersonating && Number(marker.targetId) === req.user.id) {
+      const adminSession = db.prepare('SELECT admin_email, expires_at, revoked_at FROM admin_sessions WHERE jti=?').get(marker.adminJti);
+      if (adminSession && !adminSession.revoked_at && adminSession.expires_at > now() && adminSession.admin_email === marker.adminEmail) {
+        return res.json({ active: true, admin_email: marker.adminEmail });
+      }
+    }
+  } catch {}
+  res.json({ active: false });
 }));
 
 app.get('/api/me', auth, wrap((req, res) => {
