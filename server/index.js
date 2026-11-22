@@ -729,11 +729,11 @@ app.get('/api/impersonation/status', auth, wrap((req,res)=>{
 
 app.get('/api/me', auth, wrap((req, res) => {
   if(req.user.verification_status==='approved')processDueTransfers(req.user.id);
-  const card = db.prepare('SELECT last4, expiry, frozen FROM cards WHERE account_id = ?').get(req.account.id);
+  const card = db.prepare('SELECT last4, expiry, frozen, activated, online_enabled, international_enabled, daily_limit, card_pin_hash FROM cards WHERE account_id = ?').get(req.account.id);
   res.json({
     name: req.user.full_name, email: req.user.email, verification_status: req.user.verification_status, mfa_enabled: !!req.user.mfa_enabled,
     account: { number: req.account.account_number, currency: req.account.currency, balance: req.account.balance },
-    card: { last4: card.last4, expiry: card.expiry, frozen: !!card.frozen },
+    card: { last4: card.last4, expiry: card.expiry, frozen: !!card.frozen, activated: !!card.activated, online_enabled: !!card.online_enabled, international_enabled: !!card.international_enabled, daily_limit: card.daily_limit, card_pin_set: !!card.card_pin_hash },
     sandbox_funding: SANDBOX_FUNDING
   });
 }));
@@ -861,6 +861,32 @@ app.post('/api/deposit', auth, requireVerified, moneyLimiter, wrap((req, res) =>
   });
 }));
 
+app.get('/api/card/settings',auth,requireVerified,wrap((req,res)=>{
+  const c=db.prepare('SELECT activated,online_enabled,international_enabled,daily_limit,card_pin_hash,frozen FROM cards WHERE account_id=?').get(req.account.id);
+  res.json({settings:{activated:!!c.activated,online_enabled:!!c.online_enabled,international_enabled:!!c.international_enabled,daily_limit:c.daily_limit,card_pin_set:!!c.card_pin_hash,frozen:!!c.frozen}});
+}));
+app.patch('/api/card/settings',auth,requireVerified,sensitiveWriteLimiter,wrap((req,res)=>{
+  const b=req.body||{},limit=Number(b.daily_limit);
+  if(typeof b.activated!=='boolean'||typeof b.online_enabled!=='boolean'||typeof b.international_enabled!=='boolean'||!Number.isSafeInteger(limit)||limit<10000||limit>10000000)throw httpErr(400,'Choose valid card settings and a daily limit between USD 100 and USD 100,000.');
+  verifyPin(req.user,String(b.transaction_pin||''));
+  db.prepare('UPDATE cards SET activated=?,online_enabled=?,international_enabled=?,daily_limit=? WHERE account_id=?').run(b.activated?1:0,b.online_enabled?1:0,b.international_enabled?1:0,limit,req.account.id);
+  res.json({ok:true});
+}));
+app.post('/api/card/pin',auth,requireVerified,sensitiveWriteLimiter,wrap((req,res)=>{
+  const b=req.body||{},pin=String(b.card_pin||'');
+  verifyPin(req.user,String(b.transaction_pin||''));
+  if(!/^\\d{4}$/.test(pin))throw httpErr(400,'Card PIN must be exactly 4 digits.');
+  db.prepare('UPDATE cards SET card_pin_hash=? WHERE account_id=?').run(bcrypt.hashSync(pin,12),req.account.id);
+  res.json({ok:true});
+}));
+app.post('/api/card/replace',auth,requireVerified,sensitiveWriteLimiter,wrap((req,res)=>{
+  verifyPin(req.user,String((req.body||{}).transaction_pin||''));
+  const exp=new Date();exp.setFullYear(exp.getFullYear()+4);
+  const expiry=String(exp.getMonth()+1).padStart(2,'0')+'/'+String(exp.getFullYear()).slice(2),last4=cardNumber();
+  db.prepare('UPDATE cards SET last4=?,expiry=?,frozen=0,activated=0,card_pin_hash=NULL WHERE account_id=?').run(last4,expiry,req.account.id);
+  notifyUser(req.user.id,'Card replacement requested','Your demo card was replaced. Activate it and set a new card PIN.','security');
+  res.json({ok:true,last4,expiry});
+}));
 app.post('/api/card/freeze', auth, requireVerified, wrap((req, res) => {
   const frozen = (req.body || {}).frozen ? 1 : 0;
   db.prepare('UPDATE cards SET frozen = ? WHERE account_id = ?').run(frozen, req.account.id);
