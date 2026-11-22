@@ -107,7 +107,7 @@ $('#loginForm').addEventListener('submit',async e=>{e.preventDefault();$('#login
 $('#logout').addEventListener('click',async()=>{try{await api('POST','/api/admin/logout',{});}catch(_){}showWorkspace(false);S.page='overview';});
 $('#nav').addEventListener('click',e=>{const b=e.target.closest('[data-page]');if(b)go(b.dataset.page);});
 root.addEventListener('click',async e=>{
- const b=e.target.closest('[data-act]');if(!b)return;const a=b.dataset.act;
+ const row=e.target.closest('tr[data-open=\"user\"]');if(row){S.userId=Number(row.dataset.id);setPage('user-detail');return;}\n const b=e.target.closest('[data-act]');if(!b)return;const a=b.dataset.act;
  try{
   if(a==='page'){setPage(b.dataset.page);return;}
   if(a==='refresh'){await go(S.page);return;}
@@ -127,8 +127,8 @@ root.addEventListener('change',async e=>{
  if(e.target.matches('[data-recipient]')){const id=Number(e.target.dataset.recipient);S.selected=e.target.checked?Array.from(new Set(S.selected.concat(id))):S.selected.filter(x=>x!==id);await email();}
 });
 root.addEventListener('input',e=>{
- if(e.target.matches('#userSearch')){clearTimeout(S.userTimer);S.userTimer=setTimeout(()=>users(e.target.value,$('#userStatus')?.value||'all').catch(err=>notify(err.message,true)),250);}
- if(e.target.matches('#recipientSearch')){S.emailSearch=e.target.value;clearTimeout(S.emailTimer);S.emailTimer=setTimeout(()=>email().catch(err=>notify(err.message,true)),250);}
+ if(e.target.matches('#userSearch')){const value=e.target.value,sel=$('#userStatus')?.value||'all';clearTimeout(S.userTimer);S.userTimer=setTimeout(()=>users(value,sel).then(()=>{const input=$('#userSearch');if(input){input.focus();input.setSelectionRange(value.length,value.length);}}).catch(err=>notify(err.message,true)),250);}
+ if(e.target.matches('#recipientSearch')){S.emailSearch=e.target.value;const value=S.emailSearch;clearTimeout(S.emailTimer);S.emailTimer=setTimeout(()=>email().then(()=>{const input=$('#recipientSearch');if(input){input.focus();input.setSelectionRange(value.length,value.length);}}).catch(err=>notify(err.message,true)),250);}
 });
 root.addEventListener('submit',async e=>{
  const form=e.target.closest('form[data-form]');if(!form)return;e.preventDefault();const data=Object.fromEntries(new FormData(form));const type=form.dataset.form;
@@ -139,6 +139,6 @@ root.addEventListener('submit',async e=>{
   if(type==='email'){const count=S.emailAudience==='all'?S.recipients.length:S.emailAudience==='active'?S.recipients.filter(u=>u.status==='active').length:S.selected.length;if(!confirm('Send this email to '+count+' customers?'))return;const result=await api('POST','/api/admin/email/send',{audience:S.emailAudience,userIds:S.emailAudience==='selected'?S.selected:[],subject:data.subject,message:data.message});notify('Email campaign finished: '+result.sent+' sent, '+result.failed+' failed.');root.insertAdjacentHTML('afterbegin','<div class="panel section"><b>Campaign results</b><p class="muted small">Total '+result.total+' · Sent '+result.sent+' · Failed '+result.failed+'</p>'+(result.failures||[]).map(x=>'<p class="small">'+esc(x.email)+': '+esc(x.error)+'</p>').join('')+'</div>');return;}
  }catch(err){notify(err.message,true);}
 });
-document.querySelectorAll('[data-open="user"]').forEach(el=>el.addEventListener('click',()=>{S.userId=Number(el.dataset.id);setPage('user-detail');}));
+
 api('GET','/api/admin/overview').then(()=>{showWorkspace(true);go('overview');}).catch(()=>showWorkspace(false));
 })();
