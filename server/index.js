@@ -366,7 +366,7 @@ app.get('/api/admin/users', adminAuth, wrap(async (req,res)=>{
 }));
 app.get('/api/admin/users/:id', adminAuth, wrap(async (req,res)=>{
   const id=Number(req.params.id); if(!Number.isSafeInteger(id)||id<1) throw httpErr(400,'Invalid customer ID.');
-  const user=(await db.get("SELECT u.id,u.full_name,u.email,u.status,u.verification_status,u.verification_submitted_at,u.created_at,a.id account_id,a.account_number,a.currency,a.balance,c.last4,c.expiry,c.frozen,c.demo_number,c.demo_cvv,c.card_tier,c.physical_requested,c.physical_status FROM users u JOIN accounts a ON a.user_id=u.id AND a.kind='user' LEFT JOIN cards c ON c.account_id=a.id WHERE u.id=?", [id]));
+  const user=(await db.get("SELECT u.id,u.full_name,u.email,u.status,u.verification_status,u.verification_submitted_at,u.created_at,a.id account_id,a.account_number,a.currency,a.balance,c.last4,c.expiry,c.frozen,c.demo_number,c.demo_cvv,c.card_tier,c.physical_requested,c.physical_status,c.revoked FROM users u JOIN accounts a ON a.user_id=u.id AND a.kind='user' LEFT JOIN cards c ON c.account_id=a.id WHERE u.id=?", [id]));
   const cardRequest=(await db.get('SELECT status,requested_at,reviewed_at,reviewed_by FROM card_requests WHERE user_id=?', [id]))||null;
   if(!user) throw httpErr(404,'Customer not found.');
   const transactions=(await db.all("SELECT id,type,amount,balance_after,counterparty,note,created_at FROM transactions WHERE account_id=? ORDER BY id DESC LIMIT 30", [user.account_id]));
@@ -452,6 +452,16 @@ app.patch('/api/admin/users/:id/card/physical-status',adminAuth,wrap(async(req,r
  await auditAdmin(req,'PHYSICAL_CARD_'+status.toUpperCase(),id,null,'Physical '+card.card_tier+' card delivery status updated');
  await notifyUser(id,'Physical card delivery update','Your physical card status is now '+status+'.'+(status==='delivered'?' You can activate it from your dashboard.':''),'card');
  res.json({ok:true,status});
+}));
+app.post('/api/admin/users/:id/card/revoke',adminAuth,wrap(async(req,res)=>{
+ const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid customer ID.');
+ const account=await db.get("SELECT id FROM accounts WHERE user_id=? AND kind='user'",[id]);if(!account)throw httpErr(404,'Customer account not found.');
+ const card=await db.get('SELECT id,last4,revoked FROM cards WHERE account_id=?',[account.id]);if(!card)throw httpErr(404,'Customer card not found.');
+ if(card.revoked)throw httpErr(409,'Card is already revoked.');
+ await db.run('UPDATE cards SET revoked=1,frozen=1,activated=0,online_enabled=0,international_enabled=0 WHERE id=?',[card.id]);
+ await auditAdmin(req,'CARD_REVOKED',id,null,'Admin revoked card ending '+card.last4+'; all card controls disabled');
+ await notifyUser(id,'Card revoked','Your card has been revoked and disabled. Contact support if you believe this was an error.','card');
+ res.json({ok:true,revoked:true});
 }));
 app.patch('/api/admin/users/:id/card', adminAuth, wrap(async (req,res)=>{
   const id=Number(req.params.id), frozen=(req.body||{}).frozen;
@@ -726,13 +736,13 @@ app.get('/api/impersonation/status', auth, wrap(async (req,res)=>{
 
 app.get('/api/me', auth, wrap(async (req, res) => {
   if(req.user.verification_status==='approved')await processDueTransfers(req.user.id);
-  const card=(await db.get('SELECT last4,expiry,frozen,activated,online_enabled,international_enabled,daily_limit,card_pin_hash,card_tier,physical_requested,physical_status FROM cards WHERE account_id=?', [req.account.id]));
+  const card=(await db.get('SELECT last4,expiry,frozen,activated,online_enabled,international_enabled,daily_limit,card_pin_hash,card_tier,physical_requested,physical_status,revoked FROM cards WHERE account_id=?', [req.account.id]));
   const cardProduct=await db.get('SELECT physical_card_fee_cents FROM card_product_settings WHERE id=1');
   const cardRequest=(await db.get('SELECT status,requested_at,card_tier,physical_requested,physical_fee_cents FROM card_requests WHERE user_id=?', [req.user.id]))||null;
   const kycInfo=(await db.get('SELECT admin_note,upgrade_status,upgrade_note,id_expiry FROM verification_requests WHERE user_id=?', [req.user.id]))||null;
   res.json({name:req.user.full_name,email:req.user.email,verification_status:req.user.verification_status,kyc_tier:req.user.kyc_tier,tier:kyc.tierOf(req.user),kyc:kycInfo,mfa_enabled:!!req.user.mfa_enabled,
     account:{number:req.account.account_number,currency:req.account.currency,balance:req.account.balance},
-    card:card?{last4:card.last4,expiry:card.expiry,frozen:!!card.frozen,activated:!!card.activated,online_enabled:!!card.online_enabled,international_enabled:!!card.international_enabled,daily_limit:card.daily_limit,card_pin_set:!!card.card_pin_hash,tier:card.card_tier||'normal',physical_requested:!!card.physical_requested,physical_status:card.physical_status||'not_requested'}:null,
+    card:card?{last4:card.last4,expiry:card.expiry,frozen:!!card.frozen,activated:!!card.activated,online_enabled:!!card.online_enabled,international_enabled:!!card.international_enabled,daily_limit:card.daily_limit,card_pin_set:!!card.card_pin_hash,tier:card.card_tier||'normal',physical_requested:!!card.physical_requested,physical_status:card.physical_status||'not_requested',revoked:!!card.revoked}:null,
     card_options:{physical_fee_cents:cardProduct?cardProduct.physical_card_fee_cents:2500},
     card_request:cardRequest,sandbox_funding:SANDBOX_FUNDING});
 }));
@@ -904,11 +914,22 @@ app.post('/api/card/request',auth,requireVerified,sensitiveWriteLimiter,wrap(asy
  res.status(201).json({ok:true,status:'pending',tier,physical,physical_fee_cents:fee});
 }));
 app.post('/api/card/details',auth,requireVerified,sensitiveWriteLimiter,wrap(async (req,res)=>{
- const c=(await db.get('SELECT demo_number,demo_cvv,expiry FROM cards WHERE account_id=?', [req.account.id]));
+ const c=(await db.get('SELECT demo_number,demo_cvv,expiry,revoked FROM cards WHERE account_id=?', [req.account.id]));
  if(!c)throw httpErr(404,'No card has been issued to this account yet.');
+ if(c.revoked)throw httpErr(410,'This card has been closed.');
  await verifyPin(req.user,String((req.body||{}).pin||''));
  if(!c.demo_number||!c.demo_cvv)throw httpErr(503,'Card details are unavailable. Please contact support.');
  res.json({card:{number:c.demo_number,cvv:c.demo_cvv,expiry:c.expiry}});
+}));
+app.delete('/api/card',auth,requireVerified,sensitiveWriteLimiter,wrap(async(req,res)=>{
+ const card=await db.get('SELECT id,revoked,last4 FROM cards WHERE account_id=?',[req.account.id]);
+ if(!card)throw httpErr(404,'No card has been issued to this account.');
+ if(card.revoked)throw httpErr(409,'This card is already closed.');
+ await verifyPin(req.user,String((req.body||{}).transaction_pin||''));
+ await db.run('UPDATE cards SET revoked=1,frozen=1,activated=0,online_enabled=0,international_enabled=0 WHERE id=?',[card.id]);
+ await auditAdmin(req,'USER_CARD_CLOSED',req.user.id,null,'Customer closed card ending '+card.last4);
+ await notifyUser(req.user.id,'Card closed','Your card has been closed and disabled. Contact support if you need a replacement.','card');
+ res.json({ok:true,revoked:true});
 }));
 app.get('/api/card/settings',auth,requireVerified,wrap(async (req,res)=>{
  const c=(await db.get('SELECT activated,online_enabled,international_enabled,daily_limit,card_pin_hash,frozen,physical_requested,physical_status FROM cards WHERE account_id=?', [req.account.id]));
