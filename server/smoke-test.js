@@ -111,12 +111,10 @@ function client() {
   assert.equal(r.body.beneficiaries[0].account_number, meB.account.number);
 
   r = await a('POST', '/api/airtime', { network: 'MTN', phone: '08012345678', amount: 20, pin: '1234' });
-  assert.equal(r.body.balance, 50000 - 20050 - 2000, 'airtime debited');
+  assert.equal(r.status, 404, 'airtime feature removed');
   r = await a('POST', '/api/bills', { biller: 'Electricity', reference: 'MTR-12345', amount: 75, pin: '1234' });
   assert.equal(r.status, 200);
-  r = await a('POST', '/api/card/freeze', { frozen: true });
-  assert.equal(r.body.frozen, true);
-  assert.equal((await a('GET', '/api/me')).body.card.frozen, true);
+  assert.equal((await a('GET', '/api/me')).body.card, null, 'card is not auto-issued');
 
   // Ledger must balance: all account balances sum to zero across user + system accounts.
   const db = require('./db');
