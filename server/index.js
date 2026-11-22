@@ -798,7 +798,7 @@ app.post('/api/transfers', auth, requireVerified, moneyLimiter, wrap(async (req,
 
 app.get('/api/external-transfers', auth, wrap(async (req,res)=>{
   const rows=await db.all("SELECT id,bank_name,account_name,account_number,amount,status,note,created_at,updated_at,transfer_reference,review_note FROM external_transfer_requests WHERE user_id=? ORDER BY id DESC LIMIT 100", [req.user.id]);
-  const transfers=rows.map(t=>{let details={};const prefix=String(t.note||'').startsWith('ptb-transfer-v3:')?'ptb-transfer-v3:':'ptb-transfer-v2:';if(String(t.note||'').startsWith(prefix)){try{details=JSON.parse(unsealKyc(t.note.slice(prefix.length))||'{}');}catch{}}return {...t,account_number:'••••'+String(details.account_number||t.account_number||'').slice(-4),note:details.memo||(String(t.note||'').startsWith(prefix)?'':t.note||'')};});
+  const transfers=rows.map(t=>{let details={};const prefix=String(t.note||'').startsWith('ptb-transfer-v3:')?'ptb-transfer-v3:':'ptb-transfer-v2:';if(String(t.note||'').startsWith(prefix)){try{details=JSON.parse(unsealKyc(t.note.slice(prefix.length))||'{}');}catch{}}return {...t,account_number:'••••'+String(details.account_number||details.iban||t.account_number||'').slice(-4),note:details.memo||(String(t.note||'').startsWith(prefix)?'':t.note||'')};});
   res.json({transfers});
 }));
 app.post('/api/external-transfers', auth, requireVerified, moneyLimiter, wrap(async (req,res)=>{
