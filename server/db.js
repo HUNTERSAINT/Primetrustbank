@@ -158,6 +158,15 @@ CREATE INDEX IF NOT EXISTS idx_admin_sessions_expiry ON admin_sessions(expires_a
 /* Customer self-service expansion: durable notifications, disputes, saved recipients,
    scheduled transfers and account controls. */
 db.exec(`
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id,created_at DESC);
 CREATE TABLE IF NOT EXISTS user_sessions (
   jti TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id),
