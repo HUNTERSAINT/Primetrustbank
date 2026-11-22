@@ -348,3 +348,28 @@ body{
 }
 @media(hover:none){.tr:hover,.page-link:hover{transform:none}}
 @media(prefers-reduced-motion:reduce){.tr,.page-link,.pillbtn,.addf,.dock button{transition:none!important}}
+
+
+/* Added banking detail screens — retain the established violet palette */
+.tx-click{width:100%;text-align:left;background:transparent;border:0;cursor:pointer;border-radius:12px;}
+.tx-click:hover{background:rgba(255,255,255,.045);}
+.tx-click .m,.tx-click .r{display:block;}
+.tx-click>svg.i{color:var(--muted);font-size:12px;}
+.statement-filter{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0 14px;}
+.statement-filter .pillbtn{grid-column:1/-1;padding:11px;}
+.receipt-hero{display:grid;justify-items:center;text-align:center;gap:9px;padding:24px 16px;margin-top:10px;}
+.receipt-mark{width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:rgba(185,161,255,.15);color:var(--accent);font-size:22px;border:1px solid rgba(185,161,255,.2);}
+.receipt-hero>small{color:var(--muted);font-size:12px;}
+.receipt-amount{font:600 27px var(--font-display);letter-spacing:-.5px;font-variant-numeric:tabular-nums;}
+.status-chip{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:5px 10px;background:rgba(94,224,160,.12);color:var(--good);font-size:10px;font-weight:700;letter-spacing:.02em;}
+.receipt-details{margin-top:12px;padding:14px;}
+.receipt-details .kv{font-size:12px;}
+.receipt-details .kv b{max-width:62%;}
+.profile-hero{margin-top:12px;display:grid;justify-items:center;text-align:center;gap:8px;padding:22px 16px;}
+.profile-hero .av{width:58px;height:58px;font-size:20px;border:2px solid rgba(255,255,255,.18);}
+.profile-hero h2{font:600 20px var(--font-display);}
+.profile-hero p{font-size:12px;color:var(--muted);overflow-wrap:anywhere;}
+.transfer-review{text-align:center;padding:18px 12px 22px;}
+.review-amount{font:600 30px var(--font-display);letter-spacing:-.5px;margin-bottom:8px;font-variant-numeric:tabular-nums;}
+.transfer-review h3{font-size:18px;margin-top:6px;overflow-wrap:anywhere;}
+@media(max-width:360px){.statement-filter{gap:7px}.receipt-amount{font-size:24px}.review-amount{font-size:26px}}
