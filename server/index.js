@@ -924,12 +924,11 @@ app.post('/api/card/details',auth,requireVerified,sensitiveWriteLimiter,wrap(asy
 app.delete('/api/card',auth,requireVerified,sensitiveWriteLimiter,wrap(async(req,res)=>{
  const card=await db.get('SELECT id,revoked,last4 FROM cards WHERE account_id=?',[req.account.id]);
  if(!card)throw httpErr(404,'No card has been issued to this account.');
- if(card.revoked)throw httpErr(409,'This card is already closed.');
  await verifyPin(req.user,String((req.body||{}).transaction_pin||''));
- await db.run('UPDATE cards SET revoked=1,frozen=1,activated=0,online_enabled=0,international_enabled=0 WHERE id=?',[card.id]);
- await auditAdmin(req,'USER_CARD_CLOSED',req.user.id,null,'Customer closed card ending '+card.last4);
- await notifyUser(req.user.id,'Card closed','Your card has been closed and disabled. Contact support if you need a replacement.','card');
- res.json({ok:true,revoked:true});
+ await db.run('DELETE FROM cards WHERE id=? AND account_id=?',[card.id,req.account.id]);
+ await auditAdmin(req,'USER_CARD_DELETED',req.user.id,null,'Customer removed card ending '+card.last4+' from dashboard'+(card.revoked?' after revocation':''));
+ await notifyUser(req.user.id,'Card removed','Your card has been removed from your dashboard. You may request another card if eligible.','card');
+ res.json({ok:true,deleted:true});
 }));
 app.get('/api/card/settings',auth,requireVerified,wrap(async (req,res)=>{
  const c=(await db.get('SELECT activated,online_enabled,international_enabled,daily_limit,card_pin_hash,frozen,physical_requested,physical_status,revoked FROM cards WHERE account_id=?', [req.account.id]));
