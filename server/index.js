@@ -186,6 +186,10 @@ function move({ from, to, amount, typeOut, typeIn, counterOut, counterIn, note }
   const s = getAcc.get(from.id), d = getAcc.get(to.id);
   insTx.run(gid, s.id, typeOut, -amount, s.balance, counterOut, note || null, t);
   insTx.run(gid, d.id, typeIn, amount, d.balance, counterIn, note || null, t);
+  const fromOwner=db.prepare('SELECT user_id FROM accounts WHERE id=?').get(s.id).user_id;
+  const toOwner=db.prepare('SELECT user_id FROM accounts WHERE id=?').get(d.id).user_id;
+  if(fromOwner)notifyUser(fromOwner,'Transfer sent','A transfer of USD '+(amount/100).toFixed(2)+' was sent.','transfer');
+  if(toOwner)notifyUser(toOwner,'Money received','You received USD '+(amount/100).toFixed(2)+'.','transfer');
   return { group_id: gid, balance: s.balance };
 }
 
@@ -613,6 +617,7 @@ app.get('/api/impersonation/status', auth, wrap((req,res)=>{
 }));
 
 app.get('/api/me', auth, wrap((req, res) => {
+  if(req.user.verification_status==='approved')processDueTransfers(req.user.id);
   const card = db.prepare('SELECT last4, expiry, frozen FROM cards WHERE account_id = ?').get(req.account.id);
   res.json({
     name: req.user.full_name, email: req.user.email, verification_status: req.user.verification_status,
@@ -747,6 +752,106 @@ app.get('/api/admin/portal', adminAuth, (req, res) => {
   res.set('Cache-Control', 'no-store, private');
   res.type('html').send(securedHtml);
 });
+
+
+/* ---------- customer controls and service features ---------- */
+function notifyUser(userId,title,message,category='account'){
+  if(!userId)return;
+  db.prepare('INSERT INTO notifications (user_id,title,message,category,created_at) VALUES (?,?,?,?,?)').run(userId,String(title).slice(0,100),String(message).slice(0,500),category,now());
+}
+function getUserAccount(userId){return db.prepare("SELECT * FROM accounts WHERE user_id=? AND kind='user'").get(userId);}
+function transferDailyTotal(userId){
+  const start=new Date();start.setHours(0,0,0,0);
+  return db.prepare("SELECT COALESCE(SUM(-amount),0) total FROM transactions WHERE account_id=(SELECT id FROM accounts WHERE user_id=? AND kind='user') AND type='transfer_out' AND created_at>=?").get(userId,start.getTime()).total;
+}
+function processDueTransfers(userId){
+  const due=db.prepare("SELECT * FROM scheduled_transfers WHERE user_id=? AND status='scheduled' AND scheduled_at<=? ORDER BY scheduled_at LIMIT 10").all(userId,now());
+  for(const item of due){
+    try{
+      const dest=db.prepare("SELECT a.*,u.full_name FROM accounts a JOIN users u ON u.id=a.user_id WHERE a.account_number=? AND a.kind='user'").get(item.recipient_account);
+      const src=getUserAccount(userId);
+      if(!dest||!src)throw new Error('Recipient account unavailable.');
+      const amount=item.amount;
+      const out=db.transaction(()=>move({from:src,to:dest,amount,typeOut:'transfer_out',typeIn:'transfer_in',counterOut:dest.full_name,counterIn:db.prepare('SELECT full_name FROM users WHERE id=?').get(userId).full_name,note:'acct:'+dest.account_number+(item.note?'|'+item.note:'')}))();
+      db.prepare("UPDATE scheduled_transfers SET status='completed',processed_at=? WHERE id=? AND status='scheduled'").run(now(),item.id);
+      notifyUser(userId,'Scheduled transfer completed','Your scheduled transfer to '+dest.full_name+' was completed.','transfer');
+    }catch(e){
+      db.prepare("UPDATE scheduled_transfers SET status='failed',processed_at=?,failure_reason=? WHERE id=? AND status='scheduled'").run(now(),String(e.message||'Transfer failed').slice(0,200),item.id);
+      notifyUser(userId,'Scheduled transfer failed','A scheduled transfer could not be completed. Review your scheduled transfers.','transfer');
+    }
+  }
+}
+app.get('/api/notifications',auth,wrap((req,res)=>{
+  const rows=db.prepare('SELECT id,title,message,category,is_read,created_at FROM notifications WHERE user_id=? ORDER BY id DESC LIMIT 100').all(req.user.id);
+  res.json({notifications:rows,unread:rows.filter(x=>!x.is_read).length});
+}));
+app.post('/api/notifications/:id/read',auth,wrap((req,res)=>{
+  const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid notification.');
+  db.prepare('UPDATE notifications SET is_read=1 WHERE id=? AND user_id=?').run(id,req.user.id);res.json({ok:true});
+}));
+app.post('/api/notifications/read-all',auth,wrap((req,res)=>{
+  db.prepare('UPDATE notifications SET is_read=1 WHERE user_id=?').run(req.user.id);res.json({ok:true});
+}));
+app.get('/api/beneficiaries/saved',auth,wrap((req,res)=>{
+  res.json({beneficiaries:db.prepare('SELECT id,account_number,display_name,created_at FROM saved_beneficiaries WHERE user_id=? ORDER BY id DESC').all(req.user.id)});
+}));
+app.post('/api/beneficiaries/saved',auth,requireVerified,sensitiveWriteLimiter,wrap((req,res)=>{
+  const number=String((req.body||{}).account_number||'').trim(),name=String((req.body||{}).display_name||'').trim().slice(0,80);
+  if(!/^\d{10}$/.test(number)||name.length<2)throw httpErr(400,'Enter a valid account number and recipient name.');
+  const recipient=db.prepare("SELECT a.id,u.full_name FROM accounts a JOIN users u ON u.id=a.user_id WHERE a.account_number=? AND a.kind='user'").get(number);
+  if(!recipient||recipient.id===req.account.id)throw httpErr(404,'Recipient account not found.');
+  db.prepare('INSERT OR IGNORE INTO saved_beneficiaries (user_id,account_number,display_name,created_at) VALUES (?,?,?,?)').run(req.user.id,number,name||recipient.full_name,now());
+  res.status(201).json({ok:true});
+}));
+app.delete('/api/beneficiaries/saved/:id',auth,wrap((req,res)=>{
+  const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid recipient.');
+  db.prepare('DELETE FROM saved_beneficiaries WHERE id=? AND user_id=?').run(id,req.user.id);res.json({ok:true});
+}));
+app.get('/api/account/limits',auth,wrap((req,res)=>{
+  let row=db.prepare('SELECT daily_transfer_limit,daily_payment_limit,updated_at FROM account_limits WHERE user_id=?').get(req.user.id);
+  if(!row){db.prepare('INSERT OR IGNORE INTO account_limits (user_id,updated_at) VALUES (?,?)').run(req.user.id,now());row=db.prepare('SELECT daily_transfer_limit,daily_payment_limit,updated_at FROM account_limits WHERE user_id=?').get(req.user.id);}
+  res.json({limits:row,transfer_used:transferDailyTotal(req.user.id)});
+}));
+app.put('/api/account/limits',auth,requireVerified,sensitiveWriteLimiter,wrap((req,res)=>{
+  const b=req.body||{},transfer=Number(b.daily_transfer_limit),payment=Number(b.daily_payment_limit);
+  if(!Number.isSafeInteger(transfer)||transfer<10000||transfer>50000000||!Number.isSafeInteger(payment)||payment<10000||payment>10000000)throw httpErr(400,'Set valid daily limits within the allowed range.');
+  db.prepare('INSERT INTO account_limits (user_id,daily_transfer_limit,daily_payment_limit,updated_at) VALUES (?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET daily_transfer_limit=excluded.daily_transfer_limit,daily_payment_limit=excluded.daily_payment_limit,updated_at=excluded.updated_at').run(req.user.id,transfer,payment,now());
+  res.json({ok:true});
+}));
+app.get('/api/transfers/scheduled',auth,wrap((req,res)=>{
+  res.json({transfers:db.prepare('SELECT id,recipient_account,recipient_name,amount,note,scheduled_at,status,created_at,processed_at,failure_reason FROM scheduled_transfers WHERE user_id=? ORDER BY scheduled_at DESC LIMIT 100').all(req.user.id)});
+}));
+app.post('/api/transfers/scheduled',auth,requireVerified,moneyLimiter,wrap((req,res)=>{
+  const b=req.body||{},number=String(b.to_account||''),amount=cents(b.amount),when=Date.parse(String(b.scheduled_at||'')),note=String(b.note||'').replace(/[|\r\n]/g,' ').slice(0,60);
+  if(!/^\d{10}$/.test(number)||!amount||amount>100000000||!Number.isFinite(when)||when<now()+5*60*1000||when>now()+365*24*60*60*1000)throw httpErr(400,'Enter a recipient, valid amount, and schedule time at least 5 minutes from now and within one year.');
+  verifyPin(req.user,String(b.pin||''));
+  const dest=db.prepare("SELECT a.id,u.full_name FROM accounts a JOIN users u ON u.id=a.user_id WHERE a.account_number=? AND a.kind='user'").get(number);
+  if(!dest||dest.id===req.account.id)throw httpErr(404,'Recipient account not found.');
+  const lim=db.prepare('SELECT daily_transfer_limit FROM account_limits WHERE user_id=?').get(req.user.id);
+  if(lim&&amount>lim.daily_transfer_limit)throw httpErr(422,'Amount exceeds your configured transfer limit.');
+  const id=db.prepare("INSERT INTO scheduled_transfers (user_id,recipient_account,recipient_name,amount,note,scheduled_at,created_at) VALUES (?,?,?,?,?,?,?)").run(req.user.id,number,dest.full_name,amount,note,when,now()).lastInsertRowid;
+  notifyUser(req.user.id,'Transfer scheduled','Your transfer to '+dest.full_name+' is scheduled.','transfer');
+  res.status(201).json({ok:true,id});
+}));
+app.post('/api/transfers/scheduled/:id/cancel',auth,wrap((req,res)=>{
+  const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid scheduled transfer.');
+  const result=db.prepare("UPDATE scheduled_transfers SET status='cancelled' WHERE id=? AND user_id=? AND status='scheduled'").run(id,req.user.id);
+  if(!result.changes)throw httpErr(404,'Scheduled transfer not found or already processed.');
+  res.json({ok:true});
+}));
+app.get('/api/disputes',auth,wrap((req,res)=>{
+  res.json({disputes:db.prepare('SELECT id,transaction_id,reason,details,status,created_at,updated_at FROM disputes WHERE user_id=? ORDER BY id DESC LIMIT 100').all(req.user.id)});
+}));
+app.post('/api/disputes',auth,requireVerified,sensitiveWriteLimiter,wrap((req,res)=>{
+  const b=req.body||{},txId=Number(b.transaction_id),reason=String(b.reason||''),details=String(b.details||'').trim().slice(0,1500);
+  if(!Number.isSafeInteger(txId)||txId<1||!['unauthorized','incorrect_amount','duplicate','not_received','other'].includes(reason)||details.length<10)throw httpErr(400,'Choose a dispute reason and provide at least 10 characters of detail.');
+  const tx=db.prepare('SELECT id FROM transactions WHERE id=? AND account_id=?').get(txId,req.account.id);
+  if(!tx)throw httpErr(404,'Transaction not found on your account.');
+  try{db.prepare("INSERT INTO disputes (user_id,transaction_id,reason,details,created_at,updated_at) VALUES (?,?,?,?,?,?)").run(req.user.id,txId,reason,details,now(),now());}
+  catch(e){if(String(e.message).includes('UNIQUE'))throw httpErr(409,'A dispute already exists for this transaction.');throw e;}
+  notifyUser(req.user.id,'Transaction dispute submitted','Your dispute was submitted for review.','support');
+  res.status(201).json({ok:true});
+}));
 
 app.use('/api', (req, res) => fail(res, 404, 'Not found.'));
 app.use((err, req, res, next) => {
