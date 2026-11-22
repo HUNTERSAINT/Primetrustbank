@@ -66,7 +66,7 @@
       '<div class="brand">Prime Trust</div><div class="stand"></div>' +
       '<div class="tilt"><div class="cardface">' + artCard + '<span class="tt">Prime Card</span><span class="chip"></span><span class="num">1234 5678 9101</span><span class="nm">Your name here</span><span class="nw">' + ic('tap') + '</span></div></div>' +
       '<div class="cta"><button class="pillbtn w" data-act="go" data-v="register">Create account</button>' +
-      '<button class="pillbtn d" data-act="go" data-v="login">Login</button></div><a class="muted" style="display:block;text-align:center;margin-top:16px" href="/admin.html">Administrator portal</a></section>';
+      '<button class="pillbtn d" data-act="go" data-v="login">Login</button></div></section>';
   }
   function vAuth(mode) {
     var reg = mode === 'register';
