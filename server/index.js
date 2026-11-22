@@ -437,9 +437,6 @@ app.post('/api/admin/email/send', adminAuth, wrap((req,res)=>{
       results.push({user,response});
     }catch(_){failed++;results.push({user,error:'Network error'});}
   }
-      results.push({user,response});
-    }catch(_){failed++;results.push({user,error:'Network error'});}
-  }
   Promise.all(results.map(async item=>{if(item.error)return item;try{const r=await item.response;if(r.ok){sent++;return item;}failed++;return {user:item.user,error:'Email provider rejected the message (HTTP '+r.status+')'};}catch(_){failed++;return {user:item.user,error:'Network error'};}})).then(done=>{
     const failures=done.filter(x=>x.error).map(x=>({email:x.user.email,error:x.error}));
     auditAdmin(req,'EMAIL_CAMPAIGN',null,null,'audience='+audience+'; sent='+sent+'; failed='+failed);
