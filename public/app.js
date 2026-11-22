@@ -23,7 +23,7 @@
   };
 
   var goalData = null; try { goalData = JSON.parse(localStorage.getItem('ptb_goal') || 'null'); } catch (_) {}
-  var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, goal: goalData, support: { session: null, messages: [] }, impersonation: { active: false } };
+  var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], impersonation: { active: false } };
 
   // ---------- api ----------
   function api(method, url, body, idem) {
@@ -38,8 +38,8 @@
       });
   }
   function load() {
-    return Promise.all([api('GET', '/api/me'), api('GET', '/api/transactions?limit=50'), api('GET', '/api/beneficiaries'), api('GET', '/api/impersonation/status')])
-      .then(function (r) { S.me = r[0]; S.txs = r[1].transactions; S.benes = r[2].beneficiaries; S.impersonation = r[3] || {active:false}; });
+    return Promise.all([api('GET', '/api/me'), api('GET', '/api/transactions?limit=50'), api('GET', '/api/beneficiaries'), api('GET', '/api/impersonation/status'), api('GET','/api/notifications'), api('GET','/api/transfers/scheduled'), api('GET','/api/disputes'), api('GET','/api/account/limits'), api('GET','/api/beneficiaries/saved')])
+      .then(function (r) { S.me = r[0]; S.txs = r[1].transactions; S.benes = r[2].beneficiaries; S.impersonation = r[3] || {active:false}; S.notifications=r[4].notifications||[]; S.scheduled=r[5].transfers||[]; S.disputes=r[6].disputes||[]; S.limits=r[7].limits||S.limits; S.savedBenes=r[8].beneficiaries||[]; });
   }
   var tt;
   function toast(m) {
@@ -151,11 +151,11 @@
     var me=S.me, first=me.name.split(' ')[0];
     var benes=S.benes.length?S.benes.map(function(b){return '<button class="bn" data-act="pick" data-acct="'+esc(b.account_number)+'">'+avatar(b.name)+'<span class="nm">'+esc(b.name.split(' ')[0])+'</span></button>';}).join(''):'<p class="empty">Your saved recipients appear here after your first transfer.</p>';
     var trs=S.txs.slice(0,4).map(txRow).join('')||'<p class="empty">No transactions yet. Add funds to get started.</p>';
-    return '<section class="screen"><div class="panel home-balance-card" style="margin-top:12px"><div class="hrow">'+avatar(me.name)+'<div><b>Hey, '+esc(first)+'</b><small>Welcome back to Prime Trust</small></div><div class="sp"></div><button class="circ" data-act="toast" data-m="Contact support through your bank support channel" aria-label="Support">'+ic('headset')+'</button><button class="circ" data-act="toast" data-m="No new notifications" aria-label="Notifications">'+ic('bell')+'</button></div>'+
+    return '<section class="screen"><div class="panel home-balance-card" style="margin-top:12px"><div class="hrow">'+avatar(me.name)+'<div><b>Hey, '+esc(first)+'</b><small>Welcome back to Prime Trust</small></div><div class="sp"></div><button class="circ" data-act="go" data-v="support" aria-label="Support">'+ic('headset')+'</button><button class="circ" data-act="go" data-v="notifications" aria-label="Notifications">'+ic('bell')+'</button></div>'+
       '<div class="stdcard"><span class="mc"></span><span><b>Acct '+esc(me.account.number)+'</b></span><button class="copy" data-act="copy" aria-label="Copy account number">'+ic('copy')+'Copy</button></div>'+
       '<div class="balrow"><div><div class="lab">Available balance <button data-act="eye" aria-label="'+(S.hidden?'Show':'Hide')+' balance">'+ic(S.hidden?'eyeoff':'eye','font-size:14px')+'</button></div><div class="big">'+(S.hidden?'USD ••••••':'USD '+money(me.account.balance))+'</div></div><button class="addf" data-act="addfunds">'+ic('plus','font-size:12px')+'Add funds</button></div></div>'+
       '<div class="panel" style="margin-top:12px;padding:12px 6px"><div class="acts"><button class="act" data-act="go" data-v="transfers"><i>'+ic('up')+'</i>Transfer</button><button class="act" data-act="go" data-v="payments"><i>'+ic('bill')+'</i>Payments</button><button class="act" data-act="go" data-v="card"><i>'+ic('detail')+'</i>Cards</button><button class="act" data-act="go" data-v="accounts"><i>'+ic('detail')+'</i>Accounts</button></div></div>'+
-      '<div class="sub">Banking services</div><div class="panel page-links">'+pageLink('transfers','up','Transfers','Send money and manage recipients')+pageLink('payments','bill','Payments','Airtime and bills')+pageLink('accounts','detail','Accounts','Account details and balance')+pageLink('history','swap','Statements & activity','Search and export transactions')+pageLink('savings','plus','Savings goals','Track a personal target')+pageLink('security','user','Profile & security','Manage your account')+'</div>'+
+      '<div class="sub">Banking services</div><div class="panel page-links">'+pageLink('transfers','up','Transfers','Send money and manage recipients')+pageLink('payments','bill','Payments','Airtime and bills')+pageLink('accounts','detail','Accounts','Account details and balance')+pageLink('history','swap','Statements & activity','Search and export transactions')+pageLink('savings','plus','Savings goals','Track a personal target')+pageLink('security','user','Profile & security','Manage your account')+pageLink('services','dots','More banking','Notifications, scheduled payments and account controls')+'</div>'+
       '<div class="sub">Recent recipients</div><div class="benes">'+benes+'</div><div class="trh"><b>Recent activity</b><button data-act="go" data-v="history">View all</button></div>'+trs+'</section>'+dock('home');
   }
   function vHistory() {
@@ -224,7 +224,7 @@
     var me=S.me;
     return '<section class="screen">'+pageHead('Profile & security','Manage your account details')+
       '<div class="panel"><div class="hrow">'+avatar(me.name)+'<div><b>'+esc(me.name)+'</b><small>'+esc(me.email)+'</small></div></div><div class="kv"><span>Account number</span><b>'+esc(me.account.number)+'</b></div><div class="kv"><span>Identity verification</span><b>'+esc(me.verification_status||'pending')+'</b></div></div>'+
-      '<div class="sub">Account controls</div><div class="panel">'+pageLink('accounts','detail','Account details','View account number and balance')+pageLink('card','detail','Card controls','Freeze or unfreeze your card')+pageLink('verification','user','Identity verification','View or submit identity details')+pageLink('support','headset','Support chat','Message Prime Trust support')+'</div>'+
+      '<div class="sub">Account controls</div><div class="panel">'+pageLink('accounts','detail','Account details','View account number and balance')+pageLink('card','detail','Card controls','Freeze or unfreeze your card')+pageLink('verification','user','Identity verification','View or submit identity details')+pageLink('support','headset','Support chat','Message Prime Trust support')+pageLink('services','dots','More banking','Account tools and service requests')+'</div>'+
       '<button class="pillbtn d" style="margin-top:14px" data-act="logout">Log out</button></section>'+dock('profile');
   }
   function vSupport() {
@@ -297,6 +297,32 @@
       '<button class="pillbtn d" style="margin-top:16px" data-act="logout">Log out</button>');
   }
 
+
+  function vServices(){
+    return '<section class="screen">'+pageHead('More banking','Manage your everyday banking tools')+
+      '<div class="panel">'+pageLink('notifications','bell','Notifications','Security and account alerts')+pageLink('scheduled','swap','Scheduled transfers','Manage future payments')+pageLink('disputes','headset','Transaction disputes','Report a transaction issue')+pageLink('limits','detail','Account limits','Set your own daily spending limits')+pageLink('beneficiary-manage','user','Saved recipients','Manage trusted transfer recipients')+'</div></section>'+dock('home');
+  }
+  function vNotifications(){
+    var rows=S.notifications.map(function(n){return '<div class="tr"><div class="m"><b>'+esc(n.title)+'</b><small>'+esc(n.message)+' · '+esc(fdate(n.created_at))+'</small></div><div class="r">'+(n.is_read?'Read':'<button class="copy" data-act="mark-notification" data-id="'+n.id+'">Mark read</button>')+'</div></div>';}).join('')||'<p class="empty">You have no notifications yet.</p>';
+    return '<section class="screen">'+pageHead('Notifications',S.notifications.filter(function(n){return !n.is_read;}).length+' unread')+'<div class="trh"><b>Account updates</b><button data-act="read-all">Mark all read</button></div>'+rows+'</section>'+dock('profile');
+  }
+  function vScheduled(){
+    var rows=S.scheduled.map(function(x){return '<div class="tr"><div class="m"><b>'+esc(x.recipient_name)+' · USD '+money(x.amount)+'</b><small>'+esc(x.recipient_account)+' · '+esc(new Date(x.scheduled_at).toLocaleString())+' · '+esc(x.status)+(x.failure_reason?' · '+esc(x.failure_reason):'')+'</small></div><div class="r">'+(x.status==='scheduled'?'<button class="copy" data-act="cancel-schedule" data-id="'+x.id+'">Cancel</button>':'')+'</div></div>';}).join('')||'<p class="empty">No scheduled transfers.</p>';
+    return '<section class="screen">'+pageHead('Scheduled transfers','Schedule a one-time future transfer')+'<div class="panel"><form class="form" data-form="schedule"><label class="field">Recipient account<input name="to_account" inputmode="numeric" pattern="\\d{10}" maxlength="10" required></label><label class="field">Amount USD<input name="amount" type="number" min=".01" step=".01" required></label><label class="field">Date and time<input name="scheduled_at" type="datetime-local" required></label><label class="field">Note<input name="note" maxlength="60"></label><label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label><p class="hint">This demo executes due transfers when you next open the app. Do not use for real money.</p><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Schedule transfer</button></form></div><div class="trh"><b>Your scheduled payments</b></div>'+rows+'</section>'+dock('profile');
+  }
+  function vDisputes(){
+    var rows=S.disputes.map(function(d){var tx=S.txs.find(function(t){return t.id===d.transaction_id;});return '<div class="tr"><div class="m"><b>Transaction #'+d.transaction_id+' · '+esc(d.reason.replace(/_/g,' '))+'</b><small>'+esc(d.details)+' · '+esc(d.status)+' · '+esc(fdate(d.created_at))+'</small></div></div>';}).join('')||'<p class="empty">No disputes submitted.</p>';
+    var opts=S.txs.map(function(t){return '<option value="'+t.id+'">#'+t.id+' · '+esc(t.counterparty)+' · USD '+money(Math.abs(t.amount))+'</option>';}).join('');
+    return '<section class="screen">'+pageHead('Transaction disputes','Report a transaction for review')+'<div class="panel"><form class="form" data-form="dispute"><label class="field">Transaction<select name="transaction_id" required>'+opts+'</select></label><label class="field">Reason<select name="reason" required><option value="unauthorized">I did not authorize this</option><option value="incorrect_amount">Incorrect amount</option><option value="duplicate">Duplicate transaction</option><option value="not_received">Goods or service not received</option><option value="other">Other</option></select></label><label class="field">Details<textarea name="details" minlength="10" maxlength="1500" required></textarea></label><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Submit dispute</button></form></div><div class="trh"><b>Your dispute history</b></div>'+rows+'</section>'+dock('profile');
+  }
+  function vLimits(){
+    return '<section class="screen">'+pageHead('Account limits','Set personal daily transfer and payment caps')+'<div class="panel"><form class="form" data-form="limits"><label class="field">Daily transfer limit (USD)<input name="daily_transfer_limit" type="number" min="100" max="500000" step=".01" value="'+(S.limits.daily_transfer_limit/100)+'" required></label><label class="field">Daily payment limit (USD)<input name="daily_payment_limit" type="number" min="100" max="100000" step=".01" value="'+(S.limits.daily_payment_limit/100)+'" required></label><p class="hint">These are demo self-service caps, not bank-approved limits. Lower limits apply immediately; increasing them is capped by the app.</p><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Save limits</button></form></div><div class="panel" style="margin-top:12px"><div class="kv"><span>Transfer usage today</span><b>USD '+money(S.limits.transfer_used||0)+'</b></div></div></section>'+dock('profile');
+  }
+  function vBeneficiaryManage(){
+    var rows=S.savedBenes.map(function(b){return '<div class="tr"><div class="m"><b>'+esc(b.display_name)+'</b><small>'+esc(b.account_number)+'</small></div><button class="copy" data-act="remove-beneficiary" data-id="'+b.id+'">Remove</button></div>';}).join('')||'<p class="empty">No saved recipients yet.</p>';
+    return '<section class="screen">'+pageHead('Saved recipients','Save trusted account details')+'<div class="panel"><form class="form" data-form="beneficiary"><label class="field">Account number<input name="account_number" inputmode="numeric" pattern="\\d{10}" maxlength="10" required></label><label class="field">Recipient name<input name="display_name" minlength="2" maxlength="80" required></label><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Save recipient</button></form></div><div class="trh"><b>Saved recipients</b></div>'+rows+'</section>'+dock('profile');
+  }
+
   // ---------- render ----------
   function render(prefill) {
     var html;
@@ -314,6 +340,12 @@
       case 'support': html = vSupport(); break;
       case 'history': html = vHistory(); break;
       case 'card': html = vCard(); break;
+      case 'services': html = vServices(); break;
+      case 'notifications': html = vNotifications(); break;
+      case 'scheduled': html = vScheduled(); break;
+      case 'disputes': html = vDisputes(); break;
+      case 'limits': html = vLimits(); break;
+      case 'beneficiary-manage': html = vBeneficiaryManage(); break;
       default: html = vWelcome();
     }
     if (S.sheet && S.me) {
@@ -353,6 +385,12 @@
     if (a === 'clear-goal') { S.goal=null; try{localStorage.removeItem('ptb_goal');}catch(_){} S.sheet=null; S.view='savings'; return render(); }
     if (a === 'close') { S.sheet = null; return render(); }
     if (a === 'toast') return toast(t.dataset.m);
+
+    if (a === 'mark-notification') { api('POST','/api/notifications/'+t.dataset.id+'/read',{}).then(function(){return load();}).then(render).catch(function(e){toast(e.message);}); return; }
+    if (a === 'read-all') { api('POST','/api/notifications/read-all',{}).then(function(){return load();}).then(render).catch(function(e){toast(e.message);}); return; }
+    if (a === 'cancel-schedule') { if(!confirm('Cancel this scheduled transfer?'))return; api('POST','/api/transfers/scheduled/'+t.dataset.id+'/cancel',{}).then(function(){return load();}).then(render).catch(function(e){toast(e.message);}); return; }
+    if (a === 'remove-beneficiary') { api('DELETE','/api/beneficiaries/saved/'+t.dataset.id).then(function(){return load();}).then(render).catch(function(e){toast(e.message);}); return; }
+
     if (a === 'eye') { S.hidden = !S.hidden; return render(); }
     if (a === 'pick') {
       if (S.sheet === 'send') { var inp = app.querySelector('[name=to_account]'); if (inp) { inp.value = t.dataset.acct; lookup(t.dataset.acct); return; } }
@@ -407,6 +445,16 @@
       });
     }
     else if (kind === 'support') p = api('POST', '/api/support/messages', {message:d.message});
+
+    else if (kind === 'schedule') {
+      var localDate=new Date(d.scheduled_at);
+      if(!d.scheduled_at||Number.isNaN(localDate.getTime())){busy(form,false);setErr(form,'Choose a valid date and time.');return;}
+      p=api('POST','/api/transfers/scheduled',{to_account:d.to_account,amount:d.amount,pin:d.pin,note:d.note,scheduled_at:localDate.toISOString()});
+    }
+    else if (kind === 'dispute') p=api('POST','/api/disputes',{transaction_id:d.transaction_id,reason:d.reason,details:d.details});
+    else if (kind === 'limits') p=api('PUT','/api/account/limits',{daily_transfer_limit:Math.round(Number(d.daily_transfer_limit)*100),daily_payment_limit:Math.round(Number(d.daily_payment_limit)*100)});
+    else if (kind === 'beneficiary') p=api('POST','/api/beneficiaries/saved',{account_number:d.account_number,display_name:d.display_name});
+
     else if (kind === 'goal') {
       var target=Number(d.target), saved=Number(d.saved);
       if (!d.name || !Number.isFinite(target) || target<=0 || !Number.isFinite(saved) || saved<0 || saved>target) { busy(form,false); setErr(form,'Enter a valid goal, target and saved amount.'); return; }
@@ -419,6 +467,11 @@
     else return;
     p.then(function (res) {
       if (kind === 'support') return api('GET','/api/support/messages').then(function(d){S.support=d;render();toast('Message sent to support');});
+      if (kind === 'schedule') return load().then(function(){S.view='scheduled';render();toast('Transfer scheduled');});
+      if (kind === 'dispute') return load().then(function(){S.view='disputes';render();toast('Dispute submitted');});
+      if (kind === 'limits') return load().then(function(){S.view='limits';render();toast('Limits saved');});
+      if (kind === 'beneficiary') return load().then(function(){S.view='beneficiary-manage';render();toast('Recipient saved');});
+
       if (kind === 'login' || kind === 'register' || kind === 'verification') return load().then(function () { S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; render(); toast(kind === 'verification' ? 'Submitted for administrator review' : kind === 'register' ? 'Account created; KYC submitted for review' : 'Logged in'); });
       var msg = kind === 'send' ? 'Sent to ' + res.to : kind === 'airtime' ? 'Airtime bought' : 'Bill paid';
       return done(msg);
