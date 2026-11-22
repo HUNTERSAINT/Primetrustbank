@@ -191,7 +191,7 @@
     var me=S.me;
     return '<section class="screen">'+pageHead('Profile & security','Manage your account details')+
       '<div class="panel"><div class="hrow">'+avatar(me.name)+'<div><b>'+esc(me.name)+'</b><small>'+esc(me.email)+'</small></div></div><div class="kv"><span>Account number</span><b>'+esc(me.account.number)+'</b></div><div class="kv"><span>Identity verification</span><b>'+esc(me.verification_status||'pending')+'</b></div></div>'+
-      '<div class="sub">Account controls</div><div class="panel">'+pageLink('accounts','detail','Account details','View account number and balance')+pageLink('card','detail','Card controls','Freeze or unfreeze your card')+pageLink('verification','user','Identity verification','View or submit identity details')+'</div>'+
+      '<div class="sub">Account controls</div><div class="panel">'+pageLink('accounts','detail','Account details','View account number and balance')+pageLink('card','detail','Card controls','Freeze or unfreeze your card')+pageLink('verification','user','Identity verification','View or submit identity details')+pageLink('support','headset','Support chat','Message Prime Trust support')+'</div>'+
       '<button class="pillbtn d" style="margin-top:14px" data-act="logout">Log out</button></section>'+dock('profile');
   }
   function vSupport() {
