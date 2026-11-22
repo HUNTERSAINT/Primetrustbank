@@ -335,6 +335,13 @@ app.get('/api/admin/overview', adminAuth, wrap(async (req, res) => {
   const openChats = (await db.get("SELECT COUNT(*) n FROM support_sessions WHERE status='open'", [])).n;
   res.json({stats:{totalUsers:users.total||0,activeUsers:users.active||0,suspendedUsers:users.suspended||0,pendingKyc:kyc,totalTransactions:tx,totalUserBalances:balances,todayTransactions:todayTx,openChats},recentUsers,recentTransactions:recentTx});
 }));
+app.get('/api/admin/card-requests', adminAuth, wrap(async (req,res)=>{
+  const status=String(req.query.status||'pending');
+  if(status!=='pending')throw httpErr(400,'Only pending card requests can be reviewed here.');
+  const requests=await db.all("SELECT cr.user_id,cr.status,cr.requested_at,u.full_name,u.email,a.account_number FROM card_requests cr JOIN users u ON u.id=cr.user_id LEFT JOIN accounts a ON a.user_id=u.id AND a.kind='user' WHERE cr.status='pending' ORDER BY cr.requested_at ASC LIMIT 200", []);
+  const pending=(await db.get("SELECT COUNT(*) n FROM card_requests WHERE status='pending'", [])).n;
+  res.json({requests,pending});
+}));
 app.get('/api/admin/users', adminAuth, wrap(async (req,res)=>{
   const q=String(req.query.q||'').trim().slice(0,100), status=String(req.query.status||'all');
   const limit=Math.min(Math.max(Number(req.query.limit)||50,1),100), offset=Math.max(Number(req.query.offset)||0,0);
