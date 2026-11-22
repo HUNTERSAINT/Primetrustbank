@@ -1,7 +1,7 @@
 (function(){
 'use strict';
 const $=s=>document.querySelector(s), root=$('#content');
-const S={page:'overview',userId:null,kycStatus:'pending',txType:'all',txQuery:'',txFrom:'',txTo:'',chatId:null,users:[],recipients:[],selected:[],emailAudience:'active'};
+const S={page:'overview',userId:null,kycStatus:'pending',txType:'all',txQuery:'',txFrom:'',txTo:'',chatId:null,chatFilter:'open',chatSearch:'',chatMobileDetail:false,chatSearchTimer:null,users:[],recipients:[],selected:[],emailAudience:'active'};
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function money(v){return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format((Number(v)||0)/100);}
 function date(v){if(!v)return '—';return new Date(Number(v)).toLocaleString();}
@@ -81,14 +81,20 @@ async function disputes(){
 }
 async function chat(){
  const d=await api('GET','/api/admin/chat/sessions'),sessions=d.sessions||[];
- $('#chatCount').textContent=sessions.filter(s=>s.status==='open').length;
- if(!S.chatId&&sessions.length)S.chatId=sessions[0].id;
- const active=sessions.find(s=>s.id===S.chatId);
+ const openCount=sessions.filter(s=>s.status==='open').length;
+ const unreadCount=sessions.reduce((n,s)=>n+(Number(s.unread_count)||0),0);
+ $('#chatCount').textContent=openCount;
+ if(!S.chatId&&sessions.length){const first=sessions.find(s=>s.status==='open')||sessions[0];S.chatId=first.id;if(first.status!=='open')S.chatFilter='all';}
+ const active=sessions.find(s=>String(s.id)===String(S.chatId));
+ const q=(S.chatSearch||'').trim().toLowerCase();
+ const filtered=sessions.filter(s=>(S.chatFilter==='all'||s.status===S.chatFilter)&&(!q||[s.full_name,s.email,s.last_message].some(v=>String(v||'').toLowerCase().includes(q))));
  const messages=active?await api('GET','/api/admin/chat/sessions/'+active.id+'/messages'):{messages:[]};
- const list=sessions.map(s=>'<button class="chatitem '+(s.id===S.chatId?'active':'')+'" data-act="chat-select" data-id="'+s.id+'"><div class="row space"><b>'+esc(s.full_name||('Customer #'+s.user_id))+'</b>'+((s.unread_count||0)>0?'<span class="badge submitted">'+s.unread_count+'</span>':'')+'</div><small>'+esc(s.email||'')+' · '+esc(s.status)+'</small><small>'+esc(s.last_message||'No messages yet')+'</small></button>').join('');
+ const initials=s=>String(s.full_name||'Customer').trim().split(/\s+/).slice(0,2).map(x=>x[0]||'').join('').toUpperCase();
+ const list=filtered.map(s=>'<button class="chatitem '+(String(s.id)===String(S.chatId)?'active':'')+'" data-act="chat-select" data-id="'+s.id+'"><span class="chatavatar">'+esc(initials(s))+'</span><span class="chatitembody"><span class="chatitemtop"><b>'+esc(s.full_name||('Customer #'+s.user_id))+'</b><span class="chatitemtime">'+esc(date(s.last_message_at||s.updated_at))+'</span></span><span class="chatitemmeta">'+esc(s.email||'')+' · '+(s.status==='open'?'<em class="chatstatus open">Open</em>':'<em class="chatstatus closed">Closed</em>')+'</span><span class="chatpreview">'+esc(s.last_message||'No messages yet')+'</span></span>'+(Number(s.unread_count)>0?'<span class="chatunread">'+Number(s.unread_count)+'</span>':'')+'</button>').join('');
  const msgs=(messages.messages||[]).map(m=>'<div class="bubble '+(m.sender_role==='admin'?'admin':'')+'">'+esc(m.message)+'<small>'+esc(m.sender_name)+' · '+date(m.created_at)+'</small></div>').join('');
- root.innerHTML=head('Support chat','Respond to customer questions and close resolved conversations.','<button class="btn" data-act="refresh">Refresh</button>')+
- '<div class="panel chatlayout"><div class="chatlist">'+(list||noRows('No support conversations yet.'))+'</div><div class="chatpane">'+(active?'<div class="chathead"><div><b>'+esc(active.full_name||'Customer')+'</b><div class="muted small">'+esc(active.email||'')+' · '+badge(active.status)+'</div></div><button class="btn" data-act="chat-close" data-id="'+active.id+'" data-status="'+(active.status==='open'?'closed':'open')+'">'+(active.status==='open'?'Close chat':'Reopen')+'</button></div><div class="messages" id="chatMessages">'+(msgs||noRows('No messages in this conversation.'))+'</div><form class="chatcompose" data-form="chat-reply" data-id="'+active.id+'"><textarea name="message" maxlength="2000" placeholder="Write a reply…" required '+(active.status==='closed'?'disabled':'')+'></textarea><button class="btn primary" '+(active.status==='closed'?'disabled':'')+'>Send</button></form>':'<div class="empty">Select a conversation to read and reply.</div>')+'</div></div>';
+ const tabs=['open','closed','all'].map(f=>'<button class="chatfilter '+(S.chatFilter===f?'active':'')+'" data-act="chat-filter" data-filter="'+f+'">'+(f==='open'?'Open '+openCount:f==='closed'?'Closed '+sessions.filter(s=>s.status==='closed').length:'All '+sessions.length)+'</button>').join('');
+ root.innerHTML=head('Support chat','Keep customer conversations organized and respond from one inbox.','<button class="btn" data-act="refresh">Refresh</button>')+
+ '<div class="panel chatlayout '+(S.chatMobileDetail?'chat-mobile-detail':'')+'"><aside class="chatlist"><div class="chatlist-head"><div class="chatqueue-title"><b>Inbox</b><span>'+openCount+' open · '+unreadCount+' unread</span></div><label class="chatsearch"><span>⌕</span><input id="chatSearch" type="search" value="'+esc(S.chatSearch||'')+'" placeholder="Search customers or messages" autocomplete="off"></label><div class="chatfilters">'+tabs+'</div></div><div class="chatqueue">'+(list||'<div class="chat-emptylist">'+(q?'No matching conversations.':'No conversations in this view.')+'</div>')+'</div></aside><section class="chatpane">'+(active?'<div class="chathead"><button class="chatback" data-act="chat-back">← Inbox</button><div class="chatcontact"><span class="chatavatar large">'+esc(initials(active))+'</span><div class="chatcontacttext"><b>'+esc(active.full_name||'Customer')+'</b><small>'+esc(active.email||'')+'</small><small>'+esc(active.account_number||'')+' · '+badge(active.status)+'</small></div></div><button class="btn '+(active.status==='open'?'danger':'good')+'" data-act="chat-close" data-id="'+active.id+'" data-status="'+(active.status==='open'?'closed':'open')+'">'+(active.status==='open'?'Close chat':'Reopen')+'</button></div><div class="chatthread-label"><span>Conversation</span><span>'+(messages.messages||[]).length+' messages</span></div><div class="messages" id="chatMessages">'+(msgs||'<div class="chat-emptylist">No messages in this conversation yet.</div>')+'</div><form class="chatcompose" data-form="chat-reply" data-id="'+active.id+'"><textarea name="message" maxlength="2000" placeholder="'+(active.status==='closed'?'Reopen this conversation to reply':'Write a reply…')+'" required '+(active.status==='closed'?'disabled':'')+'></textarea><button class="btn primary" '+(active.status==='closed'?'disabled':'')+'>Send reply</button></form>':'<div class="chat-placeholder"><div class="chat-placeholder-icon">✉</div><b>Select a conversation</b><p>Choose a customer from your inbox to read and reply.</p></div>')+'</section></div>';
  const m=$('#chatMessages');if(m)m.scrollTop=m.scrollHeight;
 }
 async function email(){
@@ -136,7 +142,9 @@ root.addEventListener('click',async e=>{
   if(a==='kyc-review'){const decision=b.dataset.decision,id=b.dataset.id;if(!confirm((decision==='approved'?'Approve':'Reject')+' this identity verification?'))return;b.disabled=true;const note=$('[data-note="'+id+'"]').value;await api('POST','/api/admin/requests/'+id+'/review',{decision,note});notify('Identity review updated.');await kyc();return;}
   if(a==='dispute-status'){const status=b.dataset.status;if(!confirm('Mark dispute #'+b.dataset.id+' as '+status+'?'))return;await api('PATCH','/api/admin/disputes/'+b.dataset.id,{status});notify('Dispute status updated.');await disputes();return;}
   if(a==='csv'){downloadCsv();return;}
-  if(a==='chat-select'){S.chatId=Number(b.dataset.id);await chat();return;}
+  if(a==='chat-select'){S.chatId=Number(b.dataset.id);S.chatMobileDetail=true;await chat();return;}
+  if(a==='chat-back'){S.chatMobileDetail=false;await chat();return;}
+  if(a==='chat-filter'){S.chatFilter=b.dataset.filter;S.chatMobileDetail=false;await chat();return;}
   if(a==='chat-close'){const status=b.dataset.status;await api('PATCH','/api/admin/chat/sessions/'+b.dataset.id+'/close',{status});notify(status==='closed'?'Conversation closed.':'Conversation reopened.');await chat();return;}
   if(a==='email-audience'){S.emailAudience=b.dataset.audience;await email();return;}
   if(a==='select-visible'){const q=(S.emailSearch||'').toLowerCase(),vis=S.recipients.filter(u=>(u.fullName+' '+u.email).toLowerCase().includes(q)).map(u=>u.id);S.selected=Array.from(new Set(S.selected.concat(vis)));await email();return;}
@@ -149,6 +157,7 @@ root.addEventListener('change',async e=>{
 root.addEventListener('input',e=>{
  if(e.target.matches('#userSearch')){const value=e.target.value,sel=$('#userStatus')?.value||'all';clearTimeout(S.userTimer);S.userTimer=setTimeout(()=>users(value,sel).then(()=>{const input=$('#userSearch');if(input){input.focus();input.setSelectionRange(value.length,value.length);}}).catch(err=>notify(err.message,true)),250);}
  if(e.target.matches('#recipientSearch')){S.emailSearch=e.target.value;const value=S.emailSearch;clearTimeout(S.emailTimer);S.emailTimer=setTimeout(()=>email().then(()=>{const input=$('#recipientSearch');if(input){input.focus();input.setSelectionRange(value.length,value.length);}}).catch(err=>notify(err.message,true)),250);}
+ if(e.target.matches('#chatSearch')){S.chatSearch=e.target.value;const value=S.chatSearch;clearTimeout(S.chatSearchTimer);S.chatSearchTimer=setTimeout(()=>chat().then(()=>{const input=$('#chatSearch');if(input){input.focus();input.setSelectionRange(value.length,value.length);}}).catch(err=>notify(err.message,true)),180);}
 });
 root.addEventListener('submit',async e=>{
  const form=e.target.closest('form[data-form]');if(!form)return;e.preventDefault();const data=Object.fromEntries(new FormData(form));const type=form.dataset.form;
