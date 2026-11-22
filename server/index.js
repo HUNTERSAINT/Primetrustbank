@@ -737,6 +737,15 @@ app.post('/api/card/freeze', auth, requireVerified, wrap((req, res) => {
 }));
 
 app.get('/api/meta', (req, res) => res.json({ billers: BILLERS, networks: NETWORKS }));
+app.get('/api/admin/portal', adminAuth, (req, res) => {
+  if (!ADMIN_PORTAL_PATH_VALID) return fail(res, 404, 'Not found.');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.html'), 'utf8');
+  const scriptPath = ADMIN_PORTAL_PATH + '.js';
+  const securedHtml = html.replace('src="/admin.js?v=admin-novacrest-copy-07"', 'src="' + scriptPath + '?v=secure-admin-01"');
+  res.set('Cache-Control', 'no-store, private');
+  res.type('html').send(securedHtml);
+});
+
 app.use('/api', (req, res) => fail(res, 404, 'Not found.'));
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
@@ -747,14 +756,7 @@ app.use((err, req, res, next) => {
 });
 
 // ---------- static frontend ----------
-// Admin console is deliberately not exposed at the default static-file URLs.
-const ADMIN_PORTAL_PATH = String(process.env.ADMIN_PORTAL_PATH || '').trim();
-const ADMIN_PORTAL_PATH_VALID = /^\/[a-z0-9-]{24,80}$/i.test(ADMIN_PORTAL_PATH) && !ADMIN_PORTAL_PATH.includes('..');
-
-app.get('/admin.html', adminAuth, (req, res) => {
-  res.set('Cache-Control', 'no-store, private');
-  res.sendFile(path.join(__dirname, '..', 'public', 'admin.html'));
-});
+app.get('/admin.html', (req, res) => res.status(404).send('Not found.'));
 app.get('/admin.js', (req, res) => res.status(404).send('Not found.'));
 
 if (ADMIN_PORTAL_PATH_VALID) {
@@ -771,7 +773,6 @@ if (ADMIN_PORTAL_PATH_VALID) {
   });
 }
 
-// Serve the customer app and its assets. Admin files are handled above, never as ordinary public static pages.
 app.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: PROD ? '1h' : 0 }));
 
 if (require.main === module) {
