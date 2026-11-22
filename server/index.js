@@ -404,7 +404,7 @@ app.get('/api/admin/external-transfers',adminAuth,wrap(async(req,res)=>{
   const where=status==='active'?"WHERE et.status IN ('pending','processing')":status==='all'?'':"WHERE et.status=?";
   const args=status==='active'||status==='all'?[]:[status];
   const rawTransfers=await db.all("SELECT et.id,et.user_id,et.bank_name,et.account_name,et.account_number,et.amount,et.status,et.note,et.created_at,et.updated_at,et.reviewed_by,et.review_note,et.transfer_reference,u.full_name,u.email,a.account_number customer_account FROM external_transfer_requests et JOIN users u ON u.id=et.user_id JOIN accounts a ON a.user_id=et.user_id AND a.kind='user' "+where+" ORDER BY CASE et.status WHEN 'pending' THEN 0 WHEN 'processing' THEN 1 ELSE 2 END,et.created_at ASC LIMIT 250",args);
-  const transfers=rawTransfers.map(t=>{let details={};const prefix='ptb-transfer-v2:';if(String(t.note||'').startsWith(prefix)){try{details=JSON.parse(unsealKyc(t.note.slice(prefix.length))||'{}');}catch{}}return {...t,...details,note:details.memo||(String(t.note||'').startsWith(prefix)?'':t.note||'')};});
+  const transfers=rawTransfers.map(t=>{let details={};const prefix=String(t.note||'').startsWith('ptb-transfer-v3:')?'ptb-transfer-v3:':'ptb-transfer-v2:';if(String(t.note||'').startsWith(prefix)){try{details=JSON.parse(unsealKyc(t.note.slice(prefix.length))||'{}');}catch{}}return {...t,...details,note:details.memo||(String(t.note||'').startsWith(prefix)?'':t.note||'')};});
   const pending=(await db.get("SELECT COUNT(*) n FROM external_transfer_requests WHERE status='pending'",[])).n;
   res.json({transfers,pending});
 }));
@@ -798,18 +798,27 @@ app.post('/api/transfers', auth, requireVerified, moneyLimiter, wrap(async (req,
 
 app.get('/api/external-transfers', auth, wrap(async (req,res)=>{
   const rows=await db.all("SELECT id,bank_name,account_name,account_number,amount,status,note,created_at,updated_at,transfer_reference,review_note FROM external_transfer_requests WHERE user_id=? ORDER BY id DESC LIMIT 100", [req.user.id]);
-  const transfers=rows.map(t=>{let details={};const prefix='ptb-transfer-v2:';if(String(t.note||'').startsWith(prefix)){try{details=JSON.parse(unsealKyc(t.note.slice(prefix.length))||'{}');}catch{}}return {...t,account_number:'••••'+String(details.account_number||t.account_number||'').slice(-4),note:details.memo||(String(t.note||'').startsWith(prefix)?'':t.note||'')};});
+  const transfers=rows.map(t=>{let details={};const prefix=String(t.note||'').startsWith('ptb-transfer-v3:')?'ptb-transfer-v3:':'ptb-transfer-v2:';if(String(t.note||'').startsWith(prefix)){try{details=JSON.parse(unsealKyc(t.note.slice(prefix.length))||'{}');}catch{}}return {...t,account_number:'••••'+String(details.account_number||t.account_number||'').slice(-4),note:details.memo||(String(t.note||'').startsWith(prefix)?'':t.note||'')};});
   res.json({transfers});
 }));
 app.post('/api/external-transfers', auth, requireVerified, moneyLimiter, wrap(async (req,res)=>{
   await idempotent(req,res,async()=>{
     const b=req.body||{},method=String(b.transfer_type||'').toLowerCase(),bank=String(b.bank_name||'').trim().slice(0,100),name=String(b.account_name||'').trim().slice(0,100),acct=String(b.account_number||'').trim(),routing=String(b.routing_number||'').trim(),acctType=String(b.account_type||'').toLowerCase(),memo=String(b.note||'').replace(/[|\r\n]/g,' ').slice(0,100);
-    const street=String(b.recipient_street||'').trim().slice(0,120),city=String(b.recipient_city||'').trim().slice(0,60),state=String(b.recipient_state||'').trim().toUpperCase().slice(0,2),zip=String(b.recipient_postal_code||'').trim().slice(0,10),country=String(b.recipient_country||'').trim(),phone=String(b.recipient_phone||'').trim().slice(0,25),bankAddress=String(b.bank_address||'').trim().slice(0,200);
+    const street=String(b.recipient_street||'').trim().slice(0,120),city=String(b.recipient_city||'').trim().slice(0,60),state=String(b.recipient_state||'').trim().toUpperCase().slice(0,40),zip=String(b.recipient_postal_code||'').trim().slice(0,20),country=String(b.recipient_country||'').trim().slice(0,60),phone=String(b.recipient_phone||'').trim().slice(0,25),bankAddress=String(b.bank_address||'').trim().slice(0,200);
+    const swift=String(b.swift_bic||'').trim().toUpperCase(),iban=String(b.iban||'').replace(/\s/g,'').toUpperCase(),currency=String(b.destination_currency||'').trim().toUpperCase(),purpose=String(b.transfer_purpose||'').trim().slice(0,140),relationship=String(b.recipient_relationship||'').trim().slice(0,80),sourceOfFunds=String(b.source_of_funds||'').trim().slice(0,100),bankCountry=String(b.bank_country||'').trim().slice(0,60),intermediaryBank=String(b.intermediary_bank||'').trim().slice(0,100),intermediarySwift=String(b.intermediary_swift||'').trim().toUpperCase(),intermediaryAccount=String(b.intermediary_account||'').trim().slice(0,34);
     const amount=cents(b.amount);
     let aba=1;
     if(/^[0-9]{9}$/.test(routing)){aba=3*(Number(routing[0])+Number(routing[3])+Number(routing[6]))+7*(Number(routing[1])+Number(routing[4])+Number(routing[7]))+(Number(routing[2])+Number(routing[5])+Number(routing[8]));}
-    if(!['ach','wire'].includes(method)||bank.length<2||name.length<2||!/^[0-9]{4,17}$/.test(acct)||!['checking','savings'].includes(acctType)||aba%10!==0)throw httpErr(400,'Enter a valid transfer method, bank, beneficiary, account type, account number and ABA routing number.');
-    if(street.length<3||city.length<2||!/^[A-Z]{2}$/.test(state)||!/^\d{5}(-\d{4})?$/.test(zip)||country!=='United States')throw httpErr(400,'Enter the recipient’s complete U.S. street address, city, 2-letter state, ZIP code and country.');
+    if(!['ach','wire','international'].includes(method)||bank.length<2||name.length<2)throw httpErr(400,'Enter a valid transfer method, bank and beneficiary full legal name.');
+    if(method==='international'){
+      if(!/^[A-Z0-9]{8}([A-Z0-9]{3})?$/.test(swift)||!(/^[A-Z0-9]{4,34}$/.test(iban)||/^[A-Z0-9]{4,34}$/.test(acct)))throw httpErr(400,'Enter a valid SWIFT/BIC and either an IBAN or international account number.');
+      if(bankAddress.length<5||bankCountry.length<2||street.length<3||city.length<2||country.length<2||currency.length!==3||!/^[A-Z]{3}$/.test(currency)||purpose.length<3||relationship.length<2||sourceOfFunds.length<2)throw httpErr(400,'Complete the beneficiary and bank addresses, destination country/currency, transfer purpose, relationship and source of funds.');
+      if(intermediarySwift&&!/^[A-Z0-9]{8}([A-Z0-9]{3})?$/.test(intermediarySwift))throw httpErr(400,'Enter a valid intermediary SWIFT/BIC or leave it blank.');
+      if(intermediaryBank.length>0&&intermediarySwift.length===0)throw httpErr(400,'Enter the intermediary bank SWIFT/BIC when providing an intermediary bank.');
+    }else{
+      if(!/^[0-9]{4,17}$/.test(acct)||!['checking','savings'].includes(acctType)||aba%10!==0)throw httpErr(400,'Enter a valid U.S. account type, account number and 9-digit ABA routing number.');
+      if(street.length<3||city.length<2||!/^[A-Z]{2}$/.test(state)||!/^\d{5}(-\d{4})?$/.test(zip)||country!=='United States')throw httpErr(400,'Enter the recipient’s complete U.S. street address, city, 2-letter state, ZIP code and country.');
+    }
     if(phone&&!/^\+?[0-9(). -]{7,25}$/.test(phone))throw httpErr(400,'Enter a valid recipient phone number or leave it blank.');
     if(!amount||amount>1000000*100)throw httpErr(400,'Enter a valid transfer amount.');
     const limits=await db.get('SELECT daily_transfer_limit FROM account_limits WHERE user_id=?',[req.user.id]),tier=kyc.tierOf(req.user);
@@ -817,7 +826,7 @@ app.post('/api/external-transfers', auth, requireVerified, moneyLimiter, wrap(as
     const daily=Math.min(limits?limits.daily_transfer_limit:500000,tier.daily_transfer);
     if(amount>daily||(await transferDailyTotal(req.user.id))+amount>daily)throw httpErr(422,'Your daily transfer limit would be exceeded.');
     await verifyPin(req.user,b.pin);
-    const encrypted='ptb-transfer-v2:'+sealKyc(JSON.stringify({transfer_type:method,routing_number:routing,account_number:acct,account_type:acctType,recipient_address:{street,city,state,postal_code:zip,country},recipient_phone:phone,bank_address:bankAddress,memo}));
+    const encrypted='ptb-transfer-v3:'+sealKyc(JSON.stringify({transfer_type:method,routing_number:routing,account_number:acct,account_type:acctType,recipient_address:{street,city,state,postal_code:zip,country},recipient_phone:phone,bank_address:bankAddress,memo,swift_bic:swift,iban,destination_currency:currency,transfer_purpose:purpose,recipient_relationship:relationship,source_of_funds:sourceOfFunds,bank_country:bankCountry,intermediary_bank:intermediaryBank,intermediary_swift:intermediarySwift,intermediary_account:intermediaryAccount}));
     const result=await db.tx(async()=>{
       const from=await getUserAccount(req.user.id),hold=await db.get("SELECT * FROM accounts WHERE account_number='SYS-EXTERNAL-TRANSFERS' AND kind='system'");
       if(!from||!hold)throw httpErr(500,'External transfer processing account is unavailable.');
