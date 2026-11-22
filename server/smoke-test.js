@@ -10,14 +10,21 @@ const server = app.listen(0);
 const base = 'http://127.0.0.1:' + server.address().port;
 
 function client() {
-  let cookie = '';
+  const cookies = Object.create(null);
   return async (method, url, body, headers = {}) => {
+    const cookie = Object.entries(cookies).map(([name, value]) => name + '=' + value).join('; ');
     const r = await fetch(base + url, {
       method, headers: { 'content-type': 'application/json', cookie, ...headers },
       body: body ? JSON.stringify(body) : undefined
     });
-    const set = r.headers.get('set-cookie');
-    if (set) cookie = set.split(';')[0];
+    const set = r.headers.getSetCookie ? r.headers.getSetCookie() : String(r.headers.get('set-cookie') || '').split(/,\\s*(?=ptb_)/);
+    for (const line of set) {
+      const pair = String(line).split(';')[0], eq = pair.indexOf('=');
+      if (eq <= 0) continue;
+      const name = pair.slice(0, eq), value = pair.slice(eq + 1);
+      if (!value || /Max-Age=0/i.test(line)) delete cookies[name];
+      else cookies[name] = value;
+    }
     return { status: r.status, body: await r.json().catch(() => ({})) };
   };
 }
@@ -55,6 +62,17 @@ function client() {
     r = await admin('POST', '/api/admin/requests/' + request.id + '/review', { decision: 'approved', note: 'Test review passed' });
     assert.equal(r.status, 200, 'administrator approves identity');
   }
+  r = await admin('POST', '/api/admin/impersonate/' + adaRequest.user_id, {});
+  assert.equal(r.status, 200, 'admin can login as customer');
+  const impersonatedMe = await admin('GET', '/api/me');
+  assert.equal(impersonatedMe.status, 200, 'impersonated customer session works');
+  assert.equal(impersonatedMe.body.email, 'ada@example.com', 'admin is viewing the selected customer');
+  const impersonationStatus = await admin('GET', '/api/impersonation/status');
+  assert.equal(impersonationStatus.body.active, true, 'impersonation banner status is active');
+  r = await admin('POST', '/api/admin/impersonate-return', {});
+  assert.equal(r.status, 200, 'admin can return from customer session');
+  r = await admin('GET', '/api/me');
+  assert.equal(r.status, 401, 'customer session is cleared after returning to admin');
   r = await a('POST', '/api/auth/register', { email: 'ada@example.com', full_name: 'Dup', password: 'longpassword1', pin: '1234' });
   assert.equal(r.status, 409, 'duplicate email rejected');
   r = await client()('GET', '/api/me');
