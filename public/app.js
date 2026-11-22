@@ -23,7 +23,7 @@
   };
 
   var goalData = null; try { goalData = JSON.parse(localStorage.getItem('ptb_goal') || 'null'); } catch (_) {}
-  var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], impersonation: { active: false } };
+  var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], sessions: [], impersonation: { active: false } };
 
   // ---------- api ----------
   function api(method, url, body, idem) {
@@ -224,7 +224,7 @@
     var me=S.me;
     return '<section class="screen">'+pageHead('Profile & security','Manage your account details')+
       '<div class="panel"><div class="hrow">'+avatar(me.name)+'<div><b>'+esc(me.name)+'</b><small>'+esc(me.email)+'</small></div></div><div class="kv"><span>Account number</span><b>'+esc(me.account.number)+'</b></div><div class="kv"><span>Identity verification</span><b>'+esc(me.verification_status||'pending')+'</b></div></div>'+
-      '<div class="sub">Account controls</div><div class="panel">'+pageLink('accounts','detail','Account details','View account number and balance')+pageLink('card','detail','Card controls','Freeze or unfreeze your card')+pageLink('verification','user','Identity verification','View or submit identity details')+pageLink('support','headset','Support chat','Message Prime Trust support')+pageLink('services','dots','More banking','Account tools and service requests')+'</div>'+
+      '<div class="sub">Account controls</div><div class="panel">'+pageLink('accounts','detail','Account details','View account number and balance')+pageLink('card','detail','Card controls','Freeze or unfreeze your card')+pageLink('verification','user','Identity verification','View or submit identity details')+pageLink('support','headset','Support chat','Message Prime Trust support')+pageLink('services','dots','More banking','Account tools and service requests')+pageLink('sessions','user','Devices & sessions','Review and revoke signed-in devices')+'</div>'+
       '<button class="pillbtn d" style="margin-top:14px" data-act="logout">Log out</button></section>'+dock('profile');
   }
   function vSupport() {
@@ -323,6 +323,11 @@
     return '<section class="screen">'+pageHead('Saved recipients','Save trusted account details')+'<div class="panel"><form class="form" data-form="beneficiary"><label class="field">Account number<input name="account_number" inputmode="numeric" pattern="\\d{10}" maxlength="10" required></label><label class="field">Recipient name<input name="display_name" minlength="2" maxlength="80" required></label><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Save recipient</button></form></div><div class="trh"><b>Saved recipients</b></div>'+rows+'</section>'+dock('profile');
   }
 
+
+  function vSessions(){
+    var rows=S.sessions.map(function(s){return '<div class="tr"><div class="m"><b>'+(s.current?'This device · current session':'Signed-in device')+'</b><small>'+esc(s.device)+' · Last active '+esc(new Date(s.last_seen_at).toLocaleString())+' · '+(s.revoked?'Revoked':'Active')+'</small></div><div class="r">'+(!s.revoked?'<button class="copy" data-act="revoke-session" data-id="'+esc(s.id)+'">'+(s.current?'Sign out':'Revoke')+'</button>':'')+'</div></div>';}).join('')||'<p class="empty">No registered device sessions yet. Sign in again to register this device.</p>';
+    return '<section class="screen">'+pageHead('Devices & sessions','Review active sign-ins')+'<div class="panel"><p class="lead">Revoke a device you no longer use. Signing out other devices keeps this session active.</p><button class="pillbtn d" data-act="revoke-others">Sign out other devices</button></div><div class="trh"><b>Recent sessions</b></div>'+rows+'</section>'+dock('profile');
+  }
   // ---------- render ----------
   function render(prefill) {
     var html;
@@ -346,6 +351,7 @@
       case 'disputes': html = vDisputes(); break;
       case 'limits': html = vLimits(); break;
       case 'beneficiary-manage': html = vBeneficiaryManage(); break;
+      case 'sessions': html = vSessions(); break;
       default: html = vWelcome();
     }
     if (S.sheet && S.me) {
@@ -356,7 +362,7 @@
     var f = app.querySelector('input:not([type=hidden])');
     if (S.sheet || S.view === 'login' || S.view === 'register') { if (f) f.focus({ preventScroll: true }); }
   }
-  function go(v) { S.view = v; S.sheet = null; if(v==='support'){ api('GET','/api/support/messages').then(function(d){S.support=d;render();}).catch(function(e){toast(e.message);render();}); } else render(); }
+  function go(v) { S.view = v; S.sheet = null; if(v==='sessions'){api('GET','/api/security/sessions').then(function(d){S.sessions=d.sessions||[];render();}).catch(function(e){toast(e.message);render();});} else if(v==='support'){ api('GET','/api/support/messages').then(function(d){S.support=d;render();}).catch(function(e){toast(e.message);render();}); } else render(); }
   function openSheet(s, prefill) { S.sheet = s; S.idem = uuid(); render(prefill); if (s === 'send' && prefill) lookup(prefill); }
 
   // ---------- behaviour ----------
@@ -389,6 +395,9 @@
     if (a === 'mark-notification') { api('POST','/api/notifications/'+t.dataset.id+'/read',{}).then(function(){return load();}).then(render).catch(function(e){toast(e.message);}); return; }
     if (a === 'read-all') { api('POST','/api/notifications/read-all',{}).then(function(){return load();}).then(render).catch(function(e){toast(e.message);}); return; }
     if (a === 'cancel-schedule') { if(!confirm('Cancel this scheduled transfer?'))return; api('POST','/api/transfers/scheduled/'+t.dataset.id+'/cancel',{}).then(function(){return load();}).then(render).catch(function(e){toast(e.message);}); return; }
+
+    if (a === 'revoke-session') { var sid=t.dataset.id, current=S.sessions.some(function(x){return x.id===sid&&x.current;}); if(!confirm(current?'Sign out this device now?':'Revoke this device session?'))return; api('POST','/api/security/sessions/'+sid+'/revoke',{}).then(function(){if(current){S.me=null;S.txs=[];S.benes=[];S.view='welcome';render();toast('This session was signed out');}else return api('GET','/api/security/sessions').then(function(d){S.sessions=d.sessions||[];render();toast('Session revoked');});}).catch(function(e){toast(e.message);});return; }
+    if (a === 'revoke-others') { if(!confirm('Sign out all other devices?'))return; api('POST','/api/security/sessions/revoke-others',{}).then(function(){return api('GET','/api/security/sessions');}).then(function(d){S.sessions=d.sessions||[];render();toast('Other devices signed out');}).catch(function(e){toast(e.message);});return; }
     if (a === 'remove-beneficiary') { api('DELETE','/api/beneficiaries/saved/'+t.dataset.id).then(function(){return load();}).then(render).catch(function(e){toast(e.message);}); return; }
 
     if (a === 'eye') { S.hidden = !S.hidden; return render(); }
