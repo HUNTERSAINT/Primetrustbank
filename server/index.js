@@ -664,6 +664,9 @@ app.post('/api/transfers', auth, requireVerified, moneyLimiter, wrap((req, res) 
     const amt = cents(amount);
     if (!amt) throw httpErr(400, 'Enter a valid amount (up to 2 decimals).');
     if (amt > 1000000 * 100) throw httpErr(400, 'Amount is above the single transfer limit.');
+    const userLimit=db.prepare('SELECT daily_transfer_limit FROM account_limits WHERE user_id=?').get(req.user.id);
+    const dailyLimit=userLimit?userLimit.daily_transfer_limit:500000;
+    if(amt>dailyLimit||transferDailyTotal(req.user.id)+amt>dailyLimit)throw httpErr(422,'Your daily transfer limit would be exceeded. Change your account limits or try another day.');
     if (!/^\d{10}$/.test(String(to_account))) throw httpErr(400, 'Enter a 10-digit account number.');
     verifyPin(req.user, pin);
     const dest = db.prepare(`SELECT a.*, u.full_name FROM accounts a JOIN users u ON u.id = a.user_id
@@ -689,6 +692,11 @@ app.post('/api/airtime', auth, requireVerified, moneyLimiter, wrap((req, res) =>
     const { network, phone, amount, pin } = req.body || {};
     const amt = cents(amount);
     if (!amt || amt > 500 * 100) throw httpErr(400, 'Airtime must be between 0.01 and 500.');
+    const payLimitRow=db.prepare('SELECT daily_payment_limit FROM account_limits WHERE user_id=?').get(req.user.id);
+    const payLimit=payLimitRow?payLimitRow.daily_payment_limit:100000;
+    const dayStart=new Date();dayStart.setHours(0,0,0,0);
+    const payUsed=db.prepare("SELECT COALESCE(SUM(-amount),0) total FROM transactions WHERE account_id=? AND type IN ('airtime','bill') AND created_at>=?").get(req.account.id,dayStart.getTime()).total;
+    if(amt>payLimit||payUsed+amt>payLimit)throw httpErr(422,'Your daily payment limit would be exceeded.');
     if (!NETWORKS.includes(network)) throw httpErr(400, 'Choose a network.');
     if (!/^\+?\d{8,15}$/.test(String(phone || ''))) throw httpErr(400, 'Enter a valid phone number.');
     verifyPin(req.user, pin);
@@ -706,6 +714,11 @@ app.post('/api/bills', auth, requireVerified, moneyLimiter, wrap((req, res) => {
     const { biller, reference, amount, pin } = req.body || {};
     const amt = cents(amount);
     if (!amt || amt > 50000 * 100) throw httpErr(400, 'Enter a valid amount.');
+    const payLimitRow=db.prepare('SELECT daily_payment_limit FROM account_limits WHERE user_id=?').get(req.user.id);
+    const payLimit=payLimitRow?payLimitRow.daily_payment_limit:100000;
+    const dayStart=new Date();dayStart.setHours(0,0,0,0);
+    const payUsed=db.prepare("SELECT COALESCE(SUM(-amount),0) total FROM transactions WHERE account_id=? AND type IN ('airtime','bill') AND created_at>=?").get(req.account.id,dayStart.getTime()).total;
+    if(amt>payLimit||payUsed+amt>payLimit)throw httpErr(422,'Your daily payment limit would be exceeded.');
     if (!BILLERS.includes(biller)) throw httpErr(400, 'Choose a bill type.');
     if (!/^[\w-]{4,30}$/.test(String(reference || ''))) throw httpErr(400, 'Enter the meter, smartcard or account reference.');
     verifyPin(req.user, pin);
