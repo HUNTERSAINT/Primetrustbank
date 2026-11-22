@@ -96,4 +96,39 @@ const ensureSystem = db.prepare(
 ensureSystem.run('SYS-BILLERS');
 ensureSystem.run('SYS-SANDBOX');
 
+
+const adminColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
+if (!adminColumns.includes('status')) {
+  db.exec("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended'))");
+}
+db.exec(`
+CREATE TABLE IF NOT EXISTS admin_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  admin_email TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target_user_id INTEGER,
+  amount INTEGER,
+  details TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit(created_at DESC);
+CREATE TABLE IF NOT EXISTS support_sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL UNIQUE REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS support_messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id INTEGER NOT NULL REFERENCES support_sessions(id),
+  sender_role TEXT NOT NULL CHECK (sender_role IN ('user','admin')),
+  sender_name TEXT NOT NULL,
+  message TEXT NOT NULL,
+  is_read INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_support_messages_session ON support_messages(session_id,id);
+`);
+
 module.exports = db;
