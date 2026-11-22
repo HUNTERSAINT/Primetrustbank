@@ -291,6 +291,7 @@ CREATE TABLE IF NOT EXISTS card_product_settings (
   updated_by TEXT
 );
 INSERT INTO card_product_settings (id,physical_card_fee_cents,updated_at) VALUES (1,2500,0) ON CONFLICT (id) DO NOTHING;
+ALTER TABLE card_product_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cards ADD COLUMN IF NOT EXISTS card_tier TEXT NOT NULL DEFAULT 'normal';
 ALTER TABLE cards ADD COLUMN IF NOT EXISTS physical_requested INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE cards ADD COLUMN IF NOT EXISTS physical_status TEXT NOT NULL DEFAULT 'not_requested';
