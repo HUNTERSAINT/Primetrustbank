@@ -778,13 +778,14 @@ app.get('/api/external-transfers', auth, wrap(async (req,res)=>{
 }));
 app.post('/api/external-transfers', auth, requireVerified, moneyLimiter, wrap(async (req,res)=>{
   await idempotent(req,res,async()=>{
-    const b=req.body||{},method=String(b.transfer_type||'').toLowerCase(),bank=String(b.bank_name||'').trim().slice(0,100),name=String(b.account_name||'').trim().slice(0,100),acct=String(b.account_number||'').trim(),routing=String(b.routing_number||'').trim(),acctType=String(b.account_type||'').toLowerCase(),memo=String(b.note||'').replace(/[|\\r\\n]/g,' ').slice(0,100);
+    const b=req.body||{},method=String(b.transfer_type||'').toLowerCase(),bank=String(b.bank_name||'').trim().slice(0,100),name=String(b.account_name||'').trim().slice(0,100),acct=String(b.account_number||'').trim(),routing=String(b.routing_number||'').trim(),acctType=String(b.account_type||'').toLowerCase(),memo=String(b.note||'').replace(/[|\r\n]/g,' ').slice(0,100);
     const street=String(b.recipient_street||'').trim().slice(0,120),city=String(b.recipient_city||'').trim().slice(0,60),state=String(b.recipient_state||'').trim().toUpperCase().slice(0,2),zip=String(b.recipient_postal_code||'').trim().slice(0,10),country=String(b.recipient_country||'').trim(),phone=String(b.recipient_phone||'').trim().slice(0,25),bankAddress=String(b.bank_address||'').trim().slice(0,200);
     const amount=cents(b.amount);
-    const aba=(routing.length===9&&/^[0-9]{9}$/.test(routing))?(Number(routing[0])+Number(routing[3])+Number(routing[6]))*3+(Number(routing[1])+Number(routing[4])+Number(routing[7]))*7+(Number(routing[2])+Number(routing[5])+Number(routing[8]))):1;
+    let aba=1;
+    if(/^[0-9]{9}$/.test(routing)){aba=3*(Number(routing[0])+Number(routing[3])+Number(routing[6]))+7*(Number(routing[1])+Number(routing[4])+Number(routing[7]))+(Number(routing[2])+Number(routing[5])+Number(routing[8]));}
     if(!['ach','wire'].includes(method)||bank.length<2||name.length<2||!/^[0-9]{4,17}$/.test(acct)||!['checking','savings'].includes(acctType)||aba%10!==0)throw httpErr(400,'Enter a valid transfer method, bank, beneficiary, account type, account number and ABA routing number.');
-    if(street.length<3||city.length<2||!/^[A-Z]{2}$/.test(state)||!/^\\d{5}(-\\d{4})?$/.test(zip)||country!=='United States')throw httpErr(400,'Enter the recipient’s complete U.S. street address, city, 2-letter state, ZIP code and country.');
-    if(phone&&!/^\\+?[0-9(). -]{7,25}$/.test(phone))throw httpErr(400,'Enter a valid recipient phone number or leave it blank.');
+    if(street.length<3||city.length<2||!/^[A-Z]{2}$/.test(state)||!/^\d{5}(-\d{4})?$/.test(zip)||country!=='United States')throw httpErr(400,'Enter the recipient’s complete U.S. street address, city, 2-letter state, ZIP code and country.');
+    if(phone&&!/^\+?[0-9(). -]{7,25}$/.test(phone))throw httpErr(400,'Enter a valid recipient phone number or leave it blank.');
     if(!amount||amount>1000000*100)throw httpErr(400,'Enter a valid transfer amount.');
     const limits=await db.get('SELECT daily_transfer_limit FROM account_limits WHERE user_id=?',[req.user.id]),tier=kyc.tierOf(req.user);
     if(amount>tier.per_transaction)throw httpErr(422,'This amount is above the limit for your verification level ('+tier.name+').');
