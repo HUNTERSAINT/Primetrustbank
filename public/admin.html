@@ -138,6 +138,14 @@ main{padding-top:28px}
 @media(max-width:600px){.chatlayout{display:block!important;position:relative;height:calc(100dvh - 255px);min-height:400px;max-height:720px;overflow:hidden;border-radius:17px}.chatlist{position:absolute;inset:0;display:flex;width:100%;height:100%;border:0;z-index:1}.chatpane{display:none;position:absolute;inset:0;width:100%;height:100%;z-index:2}.chatlayout.chat-mobile-detail .chatpane{display:flex}.chatlayout.chat-mobile-detail .chatlist{display:none}.chatlist-head{padding:12px}.chatqueue{padding:5px}.chatitem{padding:10px!important}.chathead{gap:7px;padding:10px}.chatback{display:inline-flex}.chatcontact{gap:7px}.chatcontacttext b{font-size:11px}.chatcontacttext small{font-size:9px}.chathead>.btn{padding:8px 9px;font-size:10px}.chatthread-label{padding:8px 12px}.messages{padding:12px}.bubble{max-width:88%;padding:11px 12px;font-size:12px}.chatcompose{padding:9px;gap:7px}.chatcompose textarea{min-height:44px;max-height:100px;padding:10px;font-size:12px}.chatcompose button{min-width:78px;padding:0 11px;font-size:11px}.chatitemtop b{font-size:11px}.chatitemtime{font-size:8px}}
 @media(prefers-reduced-motion:reduce){.chatitem,.chatfilter{transition:none!important}}
 
+
+/* Keep admin navigation stacked vertically on phones and tablets */
+@media(max-width:900px){
+ .workspace{grid-template-columns:1fr}
+ .sidebar{position:static;display:grid;grid-template-columns:1fr;overflow:visible;white-space:normal;width:100%;gap:5px}
+ .navbtn{width:100%;flex:none;justify-content:flex-start}
+ .navbtn:hover{transform:translateY(-1px)}
+}
 </style></head><body><main>
 <header class="top"><div><div class="brand">Prime Trust <small>/ ADMIN CONSOLE</small></div><div class="muted small" style="margin-top:4px">Customer operations & account oversight</div></div><div class="topright"><span class="pill">Secure administrator session</span><button id="logout" class="btn ghost hidden">Sign out</button></div></header>
 <section id="login" class="panel loginwrap"><h1 style="font:700 30px 'Space Grotesk';margin:0 0 8px">Administrator sign in</h1><p class="muted" style="line-height:1.6">Sign in to manage customer accounts, identity reviews, transactions and support.</p><form id="loginForm"><label class="field">Admin email<input name="email" type="email" required autocomplete="username"></label><label class="field">Password<input name="password" type="password" required autocomplete="current-password"></label><div class="error" id="loginErr"></div><button class="btn primary">Sign in securely</button></form></section>
