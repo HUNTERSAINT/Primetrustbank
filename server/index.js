@@ -526,18 +526,18 @@ app.post('/api/auth/register', authLimiter, wrap((req, res) => {
   const password = b.password;
   const pin = b.pin;
 
-  if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(em) || em.length > 120) throw httpErr(400, 'Enter a valid email address.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em) || em.length > 120) throw httpErr(400, 'Enter a valid email address.');
   if (name.length < 2 || name.length > 80) throw httpErr(400, 'Enter your full name.');
   if (typeof password !== 'string' || password.length < 12 || Buffer.byteLength(password, 'utf8') > 72) throw httpErr(400, 'Password must be at least 12 characters and no more than 72 UTF-8 bytes.');
-  if (typeof pin !== 'string' || !/^\\d{4}$/.test(pin)) throw httpErr(400, 'Transaction PIN must be 4 digits.');
+  if (typeof pin !== 'string' || !/^\d{4}$/.test(pin)) throw httpErr(400, 'Transaction PIN must be 4 digits.');
   if (legalName.length < 2 || legalName.length > 100) throw httpErr(400, 'Enter your legal name.');
-  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(dob) || Number.isNaN(Date.parse(dob)) || new Date(dob + 'T00:00:00Z').toISOString().slice(0,10) !== dob) throw httpErr(400, 'Enter a valid date of birth.');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dob) || Number.isNaN(Date.parse(dob)) || new Date(dob + 'T00:00:00Z').toISOString().slice(0,10) !== dob) throw httpErr(400, 'Enter a valid date of birth.');
   if (dob > new Date().toISOString().slice(0,10)) throw httpErr(400, 'Date of birth cannot be in the future.');
   if (address.length < 8 || address.length > 250) throw httpErr(400, 'Enter your residential address.');
   if (!['Passport','Driver license','National identity card','Other government ID'].includes(idType)) throw httpErr(400, 'Choose a valid ID type.');
   const validImage = (value, required) => {
     if (!value) return !required;
-    if (value.length > 1500000 || !/^data:image\\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) return false;
+    if (value.length > 1500000 || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) return false;
     const data = value.slice(value.indexOf(',') + 1);
     return data.length > 0 && Buffer.from(data, 'base64').length <= 1100000;
   };
