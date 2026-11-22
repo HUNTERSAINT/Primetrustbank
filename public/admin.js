@@ -19,7 +19,7 @@ async function go(page){S.page=page;renderNav();root.innerHTML='<div class="pane
 async function renderPage(){
  if(S.page==='overview')return overview();
  if(S.page==='users')return users();
- if(S.page==='card-requests')return cardRequests();
+ if(S.page==='card-requests')return cardRequests();\n if(S.page==='external-transfers')return externalTransfers();
  if(S.page==='user-detail')return userDetail();
  if(S.page==='kyc')return kyc();
  if(S.page==='transactions')return transactions();
@@ -55,6 +55,14 @@ async function cardRequests(){
  root.innerHTML=head('Card requests','Review customer card requests and approve or decline them.')+
  '<div class="grid stats">'+stat('Pending requests',d.pending||0,'Awaiting a decision')+stat('Requests shown',requests.length,'Latest pending requests')+'</div>'+
  '<div class="panel section"><div class="row space"><h2 class="title2">Pending card requests</h2><button class="btn" data-act="refresh">Refresh</button></div>'+table(['Customer','Customer / account','Status','Requested','Actions'],rows)+(rows?'':noRows('No pending card requests.'))+'</div>';
+}
+async function externalTransfers(){
+ const d=await api('GET','/api/admin/external-transfers?status=active'),items=d.transfers||[];
+ $('#externalTransferCount').textContent=d.pending||0;
+ const rows=items.map(x=>'<tr><td><b>#'+esc(x.id)+'</b><small class="muted" style="display:block">'+date(x.created_at)+'</small></td><td>'+customer({full_name:x.full_name,email:x.email})+'<small class="muted" style="display:block">User #'+esc(x.user_id)+' · '+esc(x.customer_account)+'</small></td><td><b>'+esc(x.bank_name)+'</b><small class="muted" style="display:block">'+esc(x.account_name)+'</small><small class="muted" style="display:block">Account: '+esc(x.account_number)+'</small>'+(x.note?'<small class="muted" style="display:block">Note: '+esc(x.note)+'</small>':'')+'</td><td><b>'+money(x.amount)+'</b></td><td>'+badge(x.status)+'</td><td><div class="row">'+(x.status==='pending'?'<button class="btn" data-act="external-transfer-review" data-id="'+x.id+'" data-status="processing">Mark processing</button>':'')+'<button class="btn primary" data-act="external-transfer-review" data-id="'+x.id+'" data-status="completed">Mark completed</button><button class="btn danger" data-act="external-transfer-review" data-id="'+x.id+'" data-status="rejected">Decline / refund</button></div></td></tr>').join('');
+ root.innerHTML=head('External transfers','Review destination details, process the bank transfer outside this dashboard, then record the actual outcome.')+
+ '<div class="grid stats">'+stat('Pending requests',d.pending||0,'Awaiting review')+stat('Active requests',items.length,'Pending or processing')+'</div>'+
+ '<div class="panel section"><div class="row space"><h2 class="title2">Transfer processing queue</h2><button class="btn" data-act="refresh">Refresh</button></div><p class="muted small">Funds are reserved when a customer submits a request. Use Mark completed only after the transfer has actually been sent to the destination bank, and enter the bank-provided reference. Declining a request returns the reserved funds to the customer.</p>'+table(['Request','Customer','Destination bank details','Amount','Status','Admin actions'],rows)+(rows?'':noRows('No external transfer requests are waiting for processing.'))+'</div>';
 }
 async function userDetail(){
  const d=await api('GET','/api/admin/users/'+S.userId),u=d.user;
@@ -146,6 +154,7 @@ root.addEventListener('click',async e=>{
   if(a==='kyc-docs'){const d=await api('GET','/api/admin/requests/'+b.dataset.id);showDocs(b.dataset.id,d.documents||{},d.id_number);return;}
   if(a==='close-docs'){const modal=b.closest('.docmodal');if(modal)modal.remove();return;}
   if(a==='card'){const frozen=b.dataset.frozen==='true';if(!confirm((frozen?'Freeze':'Unfreeze')+' this customer card?'))return;await api('PATCH','/api/admin/users/'+b.dataset.id+'/card',{frozen});notify(frozen?'Customer card frozen.':'Customer card unfrozen.');await userDetail();return;}
+  if(a==='external-transfer-review'){const id=b.dataset.id,status=b.dataset.status;let transfer_reference='',review_note='';if(status==='completed'){transfer_reference=prompt('Enter the actual bank transfer reference from the bank/provider:');if(!transfer_reference||transfer_reference.trim().length<4)return;}if(status==='rejected'){review_note=prompt('Reason for declining this request (funds will be refunded):');if(!review_note||review_note.trim().length<3)return;}if(status==='processing'){review_note=prompt('Optional processing note:')||'';}if(!confirm(status==='completed'?'Confirm the bank transfer has actually been sent and mark this request completed?':status==='rejected'?'Decline this request and return the reserved funds?':'Move this request to processing?'))return;b.disabled=true;await api('POST','/api/admin/external-transfers/'+id+'/review',{status,transfer_reference,review_note});notify(status==='completed'?'Transfer marked completed.':'Transfer request updated.');await externalTransfers();return;}
   if(a==='issue-card'){if(!confirm('Approve this card request and grant the requested card?'))return;await api('POST','/api/admin/users/'+b.dataset.id+'/card/issue',{});notify('Card request approved.');if(b.dataset.from==='card-requests')await cardRequests();else await userDetail();return;}
   if(a==='reject-card'){if(!confirm('Decline this customer card request?'))return;await api('POST','/api/admin/users/'+b.dataset.id+'/card/reject',{});notify('Card request declined.');if(b.dataset.from==='card-requests')await cardRequests();else await userDetail();return;}
   if(a==='kyc-review'){const decision=b.dataset.decision,id=b.dataset.id;if(!confirm((decision==='approved'?'Approve':'Reject')+' this identity verification?'))return;b.disabled=true;const note=$('[data-note="'+id+'"]').value;await api('POST','/api/admin/requests/'+id+'/review',{decision,note,tier:Number(b.dataset.tier||1)});notify('Identity review updated.');await kyc();return;}
