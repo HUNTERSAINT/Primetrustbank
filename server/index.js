@@ -875,7 +875,7 @@ app.patch('/api/card/settings',auth,requireVerified,sensitiveWriteLimiter,wrap((
 app.post('/api/card/pin',auth,requireVerified,sensitiveWriteLimiter,wrap((req,res)=>{
   const b=req.body||{},pin=String(b.card_pin||'');
   verifyPin(req.user,String(b.transaction_pin||''));
-  if(!/^\\d{4}$/.test(pin))throw httpErr(400,'Card PIN must be exactly 4 digits.');
+  if(!/^\d{4}$/.test(pin))throw httpErr(400,'Card PIN must be exactly 4 digits.');
   db.prepare('UPDATE cards SET card_pin_hash=? WHERE account_id=?').run(bcrypt.hashSync(pin,12),req.account.id);
   res.json({ok:true});
 }));
