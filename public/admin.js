@@ -107,7 +107,8 @@ $('#loginForm').addEventListener('submit',async e=>{e.preventDefault();$('#login
 $('#logout').addEventListener('click',async()=>{try{await api('POST','/api/admin/logout',{});}catch(_){}showWorkspace(false);S.page='overview';});
 $('#nav').addEventListener('click',e=>{const b=e.target.closest('[data-page]');if(b)go(b.dataset.page);});
 root.addEventListener('click',async e=>{
- const row=e.target.closest('tr[data-open=\"user\"]');if(row){S.userId=Number(row.dataset.id);setPage('user-detail');return;}\n const b=e.target.closest('[data-act]');if(!b)return;const a=b.dataset.act;
+ const row=e.target.closest('tr[data-open=\"user\"]');if(row){S.userId=Number(row.dataset.id);setPage('user-detail');return;}
+ const b=e.target.closest('[data-act]');if(!b)return;const a=b.dataset.act;
  try{
   if(a==='page'){setPage(b.dataset.page);return;}
   if(a==='refresh'){await go(S.page);return;}
