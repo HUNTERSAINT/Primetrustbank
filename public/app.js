@@ -22,7 +22,8 @@
     return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 'k' + Date.now() + Math.random().toString(16).slice(2);
   };
 
-  var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false };
+  var goalData = null; try { goalData = JSON.parse(localStorage.getItem('ptb_goal') || 'null'); } catch (_) {}
+  var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, goal: goalData };
 
   // ---------- api ----------
   function api(method, url, body, idem) {
@@ -69,7 +70,7 @@
   }
   function vAuth(mode) {
     var reg = mode === 'register';
-    return '<section class="screen">' + status +
+    return '<section class="screen">' +
       '<div class="hd"><button class="circ" data-act="go" data-v="welcome" aria-label="Back">' + ic('back') + '</button><h4>' + (reg ? 'Create account' : 'Login') + '</h4><span></span></div>' +
       '<form class="form" data-form="' + mode + '" autocomplete="on">' +
       '<h2>' + (reg ? 'Open your account' : 'Welcome back') + '</h2>' +
@@ -135,7 +136,8 @@
       '<button class="act" data-act="toast" data-m="Cash withdrawal is not available yet"><i>' + ic('down') + '</i>Withdraw</button>' +
       '<button class="act" data-act="sheet" data-s="airtime"><i>' + ic('phone') + '</i>Buy Airtime</button>' +
       '<button class="act" data-act="sheet" data-s="bills"><i>' + ic('bill') + '</i>Pay Bills</button></div></div>' +
-      '<div class="sub">Recent beneficiaries</div><div class="benes">' + benes + '</div>' +
+      '<div class="sub">Quick access</div><div class="panel page-links">' + pageLink('transfers','up','Transfers','Send money and recipients') + pageLink('payments','bill','Payments','Airtime and bills') + pageLink('accounts','detail','Accounts','Account details and statements') + pageLink('savings','plus','Savings goals','Track a personal target') + pageLink('security','user','Profile & security','Account settings') + '</div>' +
+      '<div class="sub">Recent beneficiaries</div><div class="benes">' + benes + '</div>'
       '<div class="trh"><b>Transactions</b><button data-act="go" data-v="history">View all</button></div>' + trs +
       '</section>' + dock('home');
   }
@@ -165,6 +167,49 @@
       '</section>' + dock('card');
   }
 
+  function pageHead(title, subtitle) {
+    return '<div class="hd"><button class="circ" data-act="go" data-v="home" aria-label="Back to dashboard">' + ic('back') + '</button><div class="pagehead"><h4>' + esc(title) + '</h4><small>' + esc(subtitle || '') + '</small></div><span></span></div>';
+  }
+  function pageLink(view, icon, title, desc, action) {
+    return '<button class="page-link" data-act="' + (action || 'go') + '" data-v="' + view + '"><span class="page-icon">' + ic(icon) + '</span><span class="page-copy"><b>' + esc(title) + '</b><small>' + esc(desc) + '</small></span>' + ic('chev') + '</button>';
+  }
+  function vAccounts() {
+    var me = S.me;
+    return '<section class="screen">' + pageHead('Accounts', 'Your account information') +
+      '<div class="panel page-balance"><small>Available balance</small><strong>USD ' + money(me.account.balance) + '</strong><span>' + esc(me.account.currency || 'USD') + ' account</span></div>' +
+      '<div class="panel" style="margin-top:12px"><div class="kv"><span>Account holder</span><b>' + esc(me.name) + '</b></div><div class="kv"><span>Account number</span><b>' + esc(me.account.number) + '</b></div><div class="kv"><span>Account type</span><b>Personal</b></div><div class="kv"><span>Identity status</span><b>' + esc(me.verification_status || 'Pending') + '</b></div><button class="copy" style="margin-top:12px" data-act="copy">Copy account number</button></div>' +
+      '<div class="sub">Account services</div><div class="panel">' + pageLink('history','swap','Statements & activity','Review or export your transactions') + pageLink('card','detail','Debit card','View and control your card') + pageLink('security','user','Security','Profile and account security') + '</div>' +
+      '<div class="panel" style="margin-top:12px">' + pageLink('transfers','up','Transfers','Send money and manage recipients') + '</div></section>' + dock('accounts');
+  }
+  function vTransfers() {
+    var rec = S.benes.length ? S.benes.map(function(b){return '<div class="tr">'+avatar(b.name)+'<div class="m"><b>'+esc(b.name)+'</b><small>Account · '+esc(b.account_number)+'</small></div><button class="copy" data-act="pick" data-acct="'+esc(b.account_number)+'">Send</button></div>';}).join('') : '<p class="empty">Your saved recipients will appear here after your first transfer.</p>';
+    var recent = S.txs.filter(function(t){return t.type==='transfer_out'||t.type==='transfer_in';}).slice(0,4).map(txRow).join('') || '<p class="empty">No transfers yet.</p>';
+    return '<section class="screen">'+pageHead('Transfers','Send money to another Prime Trust account')+
+      '<div class="panel"><div class="hrow"><div><b>Domestic transfer</b><small>Account-to-account</small></div><div class="sp"></div><button class="addf" data-act="sheet" data-s="send">New transfer</button></div><p class="lead" style="margin-top:10px">Confirm the recipient name and amount before approving with your transaction PIN.</p></div>'+
+      '<div class="trh"><b>Recipients</b><span class="muted">'+S.benes.length+' saved</span></div><div class="panel">'+rec+'</div>'+
+      '<div class="trh"><b>Recent transfers</b><button data-act="go" data-v="history">All activity</button></div>'+recent+'</section>'+dock('transfers');
+  }
+  function vPayments() {
+    return '<section class="screen">'+pageHead('Payments','Airtime and everyday bills')+
+      '<div class="panel"><h3>Pay a bill</h3><p class="lead" style="margin:8px 0 14px">Choose a service and enter the required customer details.</p><button class="pillbtn w" data-act="sheet" data-s="bills">Pay bills</button></div>'+
+      '<div class="panel" style="margin-top:12px"><h3>Mobile airtime</h3><p class="lead" style="margin:8px 0 14px">Top up a mobile number using your available balance.</p><button class="pillbtn d" data-act="sheet" data-s="airtime">Buy airtime</button></div>'+
+      '<div class="trh"><b>Recent payments</b><button data-act="go" data-v="history">View activity</button></div>'+ (S.txs.filter(function(t){return t.type==='bill'||t.type==='airtime';}).slice(0,5).map(txRow).join('')||'<p class="empty">No bill or airtime payments yet.</p>')+
+      '</section>'+dock('payments');
+  }
+  function vSavings() {
+    var g=S.goal;
+    return '<section class="screen">'+pageHead('Savings goals','Plan and track your personal goals')+
+      '<div class="panel"><div class="hrow"><div><b>'+(g?esc(g.name):'Start a savings goal')+'</b><small>'+(g?'Personal progress tracker':'Create a target to stay focused')+'</small></div><div class="sp"></div><button class="copy" data-act="goal">Edit</button></div>'+
+      (g?'<div class="page-balance"><small>Saved toward goal</small><strong>USD '+Number(g.saved).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</strong><span>Target USD '+Number(g.target).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+'</span></div><div class="goalbar"><span style="width:'+Math.min(100,Math.max(0,g.saved/g.target*100))+'%"></span></div><p class="lead">'+Math.round(Math.min(100,g.saved/g.target*100))+'% complete</p>':'<p class="lead" style="margin:12px 0">This tracker helps you monitor a goal. It does not move money or create a separate deposit account.</p><button class="pillbtn w" data-act="goal">Create savings goal</button>')+
+      '</div><div class="panel" style="margin-top:12px"><h3>Keep your plan visible</h3><p class="lead" style="margin-top:8px">Update the amount you have saved as your real account balance changes. Your goal is stored on this device.</p></div></section>'+dock('savings');
+  }
+  function vSecurity() {
+    var me=S.me;
+    return '<section class="screen">'+pageHead('Profile & security','Manage your account details')+
+      '<div class="panel"><div class="hrow">'+avatar(me.name)+'<div><b>'+esc(me.name)+'</b><small>'+esc(me.email)+'</small></div></div><div class="kv"><span>Account number</span><b>'+esc(me.account.number)+'</b></div><div class="kv"><span>Identity verification</span><b>'+esc(me.verification_status||'pending')+'</b></div></div>'+
+      '<div class="sub">Account controls</div><div class="panel">'+pageLink('accounts','detail','Account details','View account number and balance')+pageLink('card','detail','Card controls','Freeze or unfreeze your card')+pageLink('verification','user','Identity verification','View or submit identity details')+'</div>'+
+      '<button class="pillbtn d" style="margin-top:14px" data-act="logout">Log out</button></section>'+dock('profile');
+  }
   // ---------- sheets ----------
   function pinField() {
     return '<label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" autocomplete="off" required placeholder="4 digits"></label>';
@@ -208,6 +253,10 @@
       '<button class="pillbtn w" style="margin-top:16px" data-act="copy">Copy account number</button>' +
       (me.sandbox_funding ? '<button class="pillbtn d" style="margin-top:10px" data-act="testfunds">Add 500.00 test funds</button>' : ''));
   }
+  function sGoal() {
+    var g=S.goal||{name:'',target:'',saved:''};
+    return sheetWrap('Savings goal','<form class="form" data-form="goal" style="margin-top:0"><label class="field">Goal name<input name="name" required maxlength="50" value="'+esc(g.name)+'" placeholder="Emergency fund"></label><label class="field">Target amount (USD)<input name="target" type="number" min="1" step="0.01" required value="'+esc(g.target)+'"></label><label class="field">Saved amount (USD)<input name="saved" type="number" min="0" step="0.01" required value="'+esc(g.saved)+'"></label><p class="hint">Tracker only; this does not move money or create a savings account.</p><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Save goal</button>'+(S.goal?'<button type="button" class="pillbtn d" data-act="clear-goal">Remove goal</button>':'')+'</form>');
+  }
   function sDetails() {
     var me = S.me;
     return sheetWrap('Card details',
@@ -234,13 +283,13 @@
       case 'login': html = vAuth('login'); break;
       case 'register': html = vAuth('register'); break;
       case 'verification': html = vVerification(); break;
-      case 'home': html = vHome(); break;
+      case 'home': html = vHome(); break;\n      case 'accounts': html = vAccounts(); break;\n      case 'transfers': html = vTransfers(); break;\n      case 'payments': html = vPayments(); break;\n      case 'savings': html = vSavings(); break;\n      case 'security': html = vSecurity(); break;
       case 'history': html = vHistory(); break;
       case 'card': html = vCard(); break;
       default: html = vWelcome();
     }
     if (S.sheet && S.me) {
-      html += ({ send: function () { return sSend(prefill); }, airtime: sAirtime, bills: sBills, fund: sFund, details: sDetails, profile: sProfile }[S.sheet] || function () { return ''; })();
+      html += ({ send: function () { return sSend(prefill); }, airtime: sAirtime, bills: sBills, fund: sFund, details: sDetails, profile: sProfile, goal: sGoal }[S.sheet] || function () { return ''; })();
     }
     app.innerHTML = html;
     var f = app.querySelector('input:not([type=hidden])');
@@ -268,12 +317,12 @@
     var a = t.dataset.act;
     if (a === 'closebg') { if (ev.target === t) { S.sheet = null; render(); } return; }
     if (a === 'go') return go(t.dataset.v);
-    if (a === 'sheet') return openSheet(t.dataset.s);
+    if (a === 'sheet') return openSheet(t.dataset.s);\n    if (a === 'goal') return openSheet('goal');\n    if (a === 'clear-goal') { S.goal=null; try{localStorage.removeItem('ptb_goal');}catch(_){} S.sheet=null; S.view='savings'; return render(); }
     if (a === 'close') { S.sheet = null; return render(); }
     if (a === 'toast') return toast(t.dataset.m);
     if (a === 'eye') { S.hidden = !S.hidden; return render(); }
     if (a === 'pick') {
-      if (S.sheet === 'send') { var inp = app.querySelector('[name=to_account]'); inp.value = t.dataset.acct; lookup(t.dataset.acct); return; }
+      if (S.sheet === 'send') { var inp = app.querySelector('[name=to_account]'); if (inp) { inp.value = t.dataset.acct; lookup(t.dataset.acct); return; } }
       return openSheet('send', t.dataset.acct);
     }
     if (a === 'copy') {
@@ -311,6 +360,12 @@
     if (kind === 'login') p = api('POST', '/api/auth/login', { email: d.email, password: d.password });
     else if (kind === 'register') p = api('POST', '/api/auth/register', d);
     else if (kind === 'verification') p = api('POST', '/api/verification/submit', d);
+    else if (kind === 'goal') {
+      var target=Number(d.target), saved=Number(d.saved);
+      if (!d.name || !Number.isFinite(target) || target<=0 || !Number.isFinite(saved) || saved<0 || saved>target) { busy(form,false); setErr(form,'Enter a valid goal, target and saved amount.'); return; }
+      S.goal={name:d.name,target:target,saved:saved}; try{localStorage.setItem('ptb_goal',JSON.stringify(S.goal));}catch(_){}
+      S.sheet=null; S.view='savings'; render(); toast('Savings goal saved'); return;
+    }
     else if (kind === 'send') p = api('POST', '/api/transfers', { to_account: d.to_account, amount: d.amount, pin: d.pin, note: d.note }, S.idem);
     else if (kind === 'airtime') p = api('POST', '/api/airtime', { network: d.network, phone: d.phone, amount: d.amount, pin: d.pin }, S.idem);
     else if (kind === 'bills') p = api('POST', '/api/bills', { biller: d.biller, reference: d.reference, amount: d.amount, pin: d.pin }, S.idem);
