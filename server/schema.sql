@@ -255,7 +255,8 @@ ALTER TABLE users                 ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accounts              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cards                 ENABLE ROW LEVEL SECURITY;
 ALTER TABLE card_requests         ENABLE ROW LEVEL SECURITY;
-ALTER TABLE transactions          ENABLE ROW LEVEL SECURITY;\nALTER TABLE external_transfer_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE transactions          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE external_transfer_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE idempotency           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE verification_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE admin_audit           ENABLE ROW LEVEL SECURITY;
@@ -273,4 +274,5 @@ ALTER TABLE account_limits        ENABLE ROW LEVEL SECURITY;
 
 INSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-BILLERS', 'system', 0)       ON CONFLICT (account_number) DO NOTHING;
 INSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-SANDBOX', 'system', 0)       ON CONFLICT (account_number) DO NOTHING;
-INSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-ADMIN-ADJUST', 'system', 0)  ON CONFLICT (account_number) DO NOTHING;\nINSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-EXTERNAL-TRANSFERS', 'system', 0) ON CONFLICT (account_number) DO NOTHING;
+INSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-ADMIN-ADJUST', 'system', 0)  ON CONFLICT (account_number) DO NOTHING;
+INSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-EXTERNAL-TRANSFERS', 'system', 0) ON CONFLICT (account_number) DO NOTHING;
