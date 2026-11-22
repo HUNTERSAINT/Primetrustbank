@@ -23,7 +23,7 @@
   };
 
   var goalData = null; try { goalData = JSON.parse(localStorage.getItem('ptb_goal') || 'null'); } catch (_) {}
-  var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, goal: goalData };
+  var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, goal: goalData, support: { session: null, messages: [] } };
 
   // ---------- api ----------
   function api(method, url, body, idem) {
@@ -194,6 +194,11 @@
       '<div class="sub">Account controls</div><div class="panel">'+pageLink('accounts','detail','Account details','View account number and balance')+pageLink('card','detail','Card controls','Freeze or unfreeze your card')+pageLink('verification','user','Identity verification','View or submit identity details')+'</div>'+
       '<button class="pillbtn d" style="margin-top:14px" data-act="logout">Log out</button></section>'+dock('profile');
   }
+  function vSupport() {
+    var msgs=(S.support&&S.support.messages||[]).map(function(m){return '<div class="bubble '+(m.sender_role==='admin'?'admin':'')+'">'+esc(m.message)+'<small>'+esc(m.sender_name)+' · '+new Date(m.created_at).toLocaleString()+'</small></div>';}).join('');
+    return '<section class="screen">'+pageHead('Support chat','Contact Prime Trust customer support')+
+      '<div class="panel chatlayout" style="height:65vh;min-height:360px;display:flex;flex-direction:column"><div class="chathead"><div><b>Prime Trust Support</b><small>We will reply here in your account</small></div><span class="muted">'+esc(S.support&&S.support.session?S.support.session.status:'open')+'</span></div><div class="messages" id="supportMessages">'+(msgs||'<p class="empty">Send a message to start a support conversation.</p>')+'</div><form class="chatcompose" data-form="support"><textarea name="message" maxlength="2000" required placeholder="Write your message to support…"></textarea><button class="pillbtn w" type="submit">Send</button></form></div></section>'+dock('profile');
+  }
   // ---------- sheets ----------
   function pinField() {
     return '<label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" autocomplete="off" required placeholder="4 digits"></label>';
@@ -272,7 +277,7 @@
       case 'transfers': html = vTransfers(); break;
       case 'payments': html = vPayments(); break;
       case 'savings': html = vSavings(); break;
-      case 'security': html = vSecurity(); break;
+      case 'security': html = vSecurity(); break;\n      case 'support': html = vSupport(); break;
       case 'history': html = vHistory(); break;
       case 'card': html = vCard(); break;
       default: html = vWelcome();
@@ -284,7 +289,7 @@
     var f = app.querySelector('input:not([type=hidden])');
     if (S.sheet || S.view === 'login' || S.view === 'register') { if (f) f.focus({ preventScroll: true }); }
   }
-  function go(v) { S.view = v; S.sheet = null; render(); }
+  function go(v) { S.view = v; S.sheet = null; if(v==='support'){ api('GET','/api/support/messages').then(function(d){S.support=d;render();}).catch(function(e){toast(e.message);render();}); } else render(); }
   function openSheet(s, prefill) { S.sheet = s; S.idem = uuid(); render(prefill); if (s === 'send' && prefill) lookup(prefill); }
 
   // ---------- behaviour ----------
@@ -305,7 +310,7 @@
     var t = ev.target.closest('[data-act]'); if (!t) return;
     var a = t.dataset.act;
     if (a === 'closebg') { if (ev.target === t) { S.sheet = null; render(); } return; }
-    if (a === 'go') return go(t.dataset.v);
+    if (a === 'go') return go(t.dataset.v);\n    if (a === 'refresh-support') return go('support');
     if (a === 'sheet') return openSheet(t.dataset.s);
     if (a === 'goal') return openSheet('goal');
     if (a === 'clear-goal') { S.goal=null; try{localStorage.removeItem('ptb_goal');}catch(_){} S.sheet=null; S.view='savings'; return render(); }
@@ -350,7 +355,7 @@
     var p;
     if (kind === 'login') p = api('POST', '/api/auth/login', { email: d.email, password: d.password });
     else if (kind === 'register') p = api('POST', '/api/auth/register', d);
-    else if (kind === 'verification') p = api('POST', '/api/verification/submit', d);
+    else if (kind === 'verification') p = api('POST', '/api/verification/submit', d);\n    else if (kind === 'support') p = api('POST', '/api/support/messages', {message:d.message});
     else if (kind === 'goal') {
       var target=Number(d.target), saved=Number(d.saved);
       if (!d.name || !Number.isFinite(target) || target<=0 || !Number.isFinite(saved) || saved<0 || saved>target) { busy(form,false); setErr(form,'Enter a valid goal, target and saved amount.'); return; }
@@ -362,7 +367,7 @@
     else if (kind === 'bills') p = api('POST', '/api/bills', { biller: d.biller, reference: d.reference, amount: d.amount, pin: d.pin }, S.idem);
     else return;
     p.then(function (res) {
-      if (kind === 'login' || kind === 'register' || kind === 'verification') return load().then(function () { S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; render(); toast(kind === 'verification' ? 'Submitted for administrator review' : kind === 'register' ? 'Account created' : 'Logged in'); });
+      if (kind === 'support') return api('GET','/api/support/messages').then(function(d){S.support=d;render();toast('Message sent to support');});\n      if (kind === 'login' || kind === 'register' || kind === 'verification') return load().then(function () { S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; render(); toast(kind === 'verification' ? 'Submitted for administrator review' : kind === 'register' ? 'Account created' : 'Logged in'); });
       var msg = kind === 'send' ? 'Sent to ' + res.to : kind === 'airtime' ? 'Airtime bought' : 'Bill paid';
       return done(msg);
     }).catch(function (e) {
