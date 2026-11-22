@@ -56,7 +56,7 @@
   function txRow(t) {
     var neg = t.amount < 0;
     var title = t.type === 'transfer_out' ? 'To ' + t.counterparty : t.type === 'transfer_in' ? 'From ' + t.counterparty : t.counterparty;
-    return '<button type="button" class="tr tx-click" data-act="transaction" data-id="' + esc(t.id) + '" aria-label="View transaction details: ' + esc(title) + '"><span class="ti">' + ic(ICON[t.type] || 'swap') + '</span>' +
+    return '<button type="button" class="tr tx-click" data-act="transaction" data-id="' + esc(t.id || t.transaction_id || t.reference || '') + '" aria-label="View transaction details: ' + esc(title) + '"><span class="ti">' + ic(ICON[t.type] || 'swap') + '</span>' +
       '<span class="m"><b>' + esc(title) + '</b><small>' + esc(LABEL[t.type] || 'Payment') + ' · ' + esc(fdate(t.created_at)) + (t.note ? ' · ' + esc(t.note) : '') + '</small></span>' +
       '<span class="r"><b style="color:' + (neg ? 'var(--fg)' : 'var(--good)') + '">' + (neg ? '-' : '+') + money(Math.abs(t.amount)) + ' USD</b><small>Successful</small></span>' + ic('chev') + '</button>';
   }
@@ -468,7 +468,7 @@
     var a = t.dataset.act;
     if (a === 'closebg') { if (ev.target === t) { S.sheet = null; render(); } return; }
     if (a === 'go') return go(t.dataset.v);
-    if (a === 'transaction') { S.selectedTx=S.txs.find(function(x){return String(x.id)===String(t.dataset.id);})||null; return go('transaction-detail'); }
+    if (a === 'transaction') { S.selectedTx=S.txs.find(function(x){return String(x.id||x.transaction_id||x.reference||'')===String(t.dataset.id);})||null; return go('transaction-detail'); }
     if (a === 'clear-statement') { S.statementFrom='';S.statementTo='';return render(); }
     if (a === 'edit-transfer') { S.sheet='send';return render(S.transferDraft&&S.transferDraft.to_account); }
     if (a === 'receipt-download') { if(!S.selectedTx)return; var q=S.selectedTx, amount=(q.amount>=0?'+':'-')+' USD '+money(Math.abs(q.amount)); var body='PRIME TRUST BANK\nTRANSACTION RECEIPT\n\nAmount: '+amount+'\nStatus: '+(q.status||'Successful')+'\nDate: '+new Date(q.created_at).toLocaleString()+'\nDescription: '+(q.counterparty||'—')+'\nReference: '+(q.reference||q.id||'—')+'\n'+(q.note?'Note: '+q.note+'\n':'')+'\nDemo receipt — not a proof of real funds.'; var blob=new Blob([body],{type:'text/plain;charset=utf-8'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='prime-trust-receipt-'+String(q.id||'transaction')+'.txt';link.click();setTimeout(function(){URL.revokeObjectURL(url);},1000);toast('Receipt downloaded');return; }
