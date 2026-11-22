@@ -273,4 +273,4 @@ ALTER TABLE account_limits        ENABLE ROW LEVEL SECURITY;
 
 INSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-BILLERS', 'system', 0)       ON CONFLICT (account_number) DO NOTHING;
 INSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-SANDBOX', 'system', 0)       ON CONFLICT (account_number) DO NOTHING;
-INSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-ADMIN-ADJUST', 'system', 0)  ON CONFLICT (account_number) DO NOTHING;
+INSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-ADMIN-ADJUST', 'system', 0)  ON CONFLICT (account_number) DO NOTHING;\nINSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-EXTERNAL-TRANSFERS', 'system', 0) ON CONFLICT (account_number) DO NOTHING;
