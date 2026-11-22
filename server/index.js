@@ -68,10 +68,12 @@ const cents = (v) => {
 };
 const fail = (res, status, message) => res.status(status).json({ error: message });
 const wrap = (fn) => (req, res) => {
-  try { fn(req, res); } catch (e) {
-    if (e.status) return fail(res, e.status, e.message);
+  const handle = (e) => {
+    if (res.headersSent) return;
+    if (e && e.status) return fail(res, e.status, e.message);
     console.error(e); fail(res, 500, 'Something went wrong. Please try again.');
-  }
+  };
+  try { Promise.resolve(fn(req, res)).catch(handle); } catch (e) { handle(e); }
 };
 const httpErr = (status, message) => Object.assign(new Error(message), { status });
 
