@@ -130,6 +130,11 @@ svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:1.7;stroke
 .cardbal small{display:block;color:var(--muted);font-size:11px}
 .cardbal b{font-family:var(--font-display);font-size:22px;font-weight:600;font-variant-numeric:tabular-nums}
 .bigcard{height:178px;border-radius:18px;transition:filter .25s,opacity .25s}
+.bigcard.tier-normal{background:linear-gradient(135deg,#176b83,#142e50);color:#fff}
+.bigcard.tier-black{background:linear-gradient(135deg,#30343a,#07090c);color:#fff;border:1px solid rgba(255,255,255,.18)}
+.bigcard.tier-platinum{background:linear-gradient(135deg,#f4f6f8,#8d9aa7);color:#15202a;border:1px solid rgba(255,255,255,.6)}
+.bigcard.tier-platinum .badge{color:#15202a}
+
 .bigcard.frozen{filter:grayscale(1) brightness(.75);opacity:.8}
 .bigcard .num{left:16px;bottom:34px;font-size:14px}
 .bigcard .nm{left:16px;bottom:14px}
