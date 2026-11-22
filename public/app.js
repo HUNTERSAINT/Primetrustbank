@@ -24,6 +24,7 @@
 
   var goalData = null; try { goalData = JSON.parse(localStorage.getItem('ptb_goal') || 'null'); } catch (_) {}
   var resetToken = new URLSearchParams(window.location.search).get('reset') || '';
+  var mfaChallengeId = '';
   var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], sessions: [], impersonation: { active: false } };
 
   // ---------- api ----------
@@ -226,6 +227,7 @@
     var me=S.me;
     return '<section class="screen">'+pageHead('Profile & security','Manage your account details')+
       '<div class="panel"><div class="hrow">'+avatar(me.name)+'<div><b>'+esc(me.name)+'</b><small>'+esc(me.email)+'</small></div></div><div class="kv"><span>Account number</span><b>'+esc(me.account.number)+'</b></div><div class="kv"><span>Identity verification</span><b>'+esc(me.verification_status||'pending')+'</b></div></div>'+
+      '<div class="sub">Sign-in security</div><div class="panel"><div class="hrow"><div><b>Multi-factor authentication</b><small>'+(me.mfa_enabled?'Enabled · email code required at sign-in':'Add an email code at sign-in')+'</small></div><div class="sp"></div><button class="copy" data-act="'+(me.mfa_enabled?'mfa-disable':'mfa-start')+'">'+(me.mfa_enabled?'Disable':'Enable')+'</button></div></div>' +
       '<div class="sub">Account controls</div><div class="panel">'+pageLink('accounts','detail','Account details','View account number and balance')+pageLink('card','detail','Card controls','Freeze or unfreeze your card')+pageLink('verification','user','Identity verification','View or submit identity details')+pageLink('support','headset','Support chat','Message Prime Trust support')+pageLink('services','dots','More banking','Account tools and service requests')+pageLink('sessions','user','Devices & sessions','Review and revoke signed-in devices')+'</div>'+
       '<button class="pillbtn d" style="margin-top:14px" data-act="logout">Log out</button></section>'+dock('profile');
   }
@@ -280,6 +282,10 @@
   function sGoal() {
     var g=S.goal||{name:'',target:'',saved:''};
     return sheetWrap('Savings goal','<form class="form" data-form="goal" style="margin-top:0"><label class="field">Goal name<input name="name" required maxlength="50" value="'+esc(g.name)+'" placeholder="Emergency fund"></label><label class="field">Target amount (USD)<input name="target" type="number" min="1" step="0.01" required value="'+esc(g.target)+'"></label><label class="field">Saved amount (USD)<input name="saved" type="number" min="0" step="0.01" required value="'+esc(g.saved)+'"></label><p class="hint">Tracker only; this does not move money or create a savings account.</p><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Save goal</button>'+(S.goal?'<button type="button" class="pillbtn d" data-act="clear-goal">Remove goal</button>':'')+'</form>');
+  }
+
+  function sMfaDisable(){
+    return sheetWrap('Disable sign-in verification','<form class="form" data-form="mfa-disable"><p class="lead">Confirm your password and transaction PIN to turn off this protection.</p><label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label><label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" required></label><p class="err" role="alert"></p><button class="pillbtn d" type="submit">Disable MFA</button></form>');
   }
   function sDetails() {
     var me = S.me;
@@ -337,6 +343,13 @@
   function vReset(){
     return '<section class="screen"><div class="brand">Prime Trust</div><form class="form" data-form="reset" style="margin-top:24px"><h2>Choose a new password</h2><p class="lead">Use at least 12 characters. The reset link is single-use and expires after 30 minutes.</p><label class="field">New password<input name="password" type="password" minlength="12" maxlength="72" autocomplete="new-password" required></label><label class="field">Confirm password<input name="confirm" type="password" minlength="12" maxlength="72" autocomplete="new-password" required></label><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Update password</button></form></section>';
   }
+
+  function vMfaLogin(){
+    return '<section class="screen"><div class="brand">Prime Trust</div><form class="form" data-form="mfa-login" style="margin-top:24px"><h2>Verify it is you</h2><p class="lead">We sent a 6-digit sign-in code to your email. It expires in 5 minutes.</p><label class="field">Verification code<input name="code" inputmode="numeric" pattern="\\d{6}" maxlength="6" autocomplete="one-time-code" required></label><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Verify & sign in</button><button type="button" class="muted" data-act="go" data-v="login">Back to login</button></form></section>';
+  }
+  function vMfaSetup(){
+    return '<section class="screen">'+pageHead('Enable sign-in verification','Add an email verification step')+'<div class="panel"><p class="lead">Enter the 6-digit code sent to your registered email to enable multi-factor authentication.</p><form class="form" data-form="mfa-setup"><label class="field">Verification code<input name="code" inputmode="numeric" pattern="\\d{6}" maxlength="6" autocomplete="one-time-code" required></label><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Enable MFA</button></form></div></section>'+dock('profile');
+  }
   // ---------- render ----------
   function render(prefill) {
     var html;
@@ -346,6 +359,8 @@
       case 'register': html = vAuth('register'); break;
       case 'forgot': html = vForgot(); break;
       case 'reset': html = vReset(); break;
+      case 'mfa-login': html = vMfaLogin(); break;
+      case 'mfa-setup': html = vMfaSetup(); break;
       case 'verification': html = vVerification(); break;
       case 'home': html = vHome(); break;
       case 'accounts': html = vAccounts(); break;
@@ -366,7 +381,7 @@
       default: html = vWelcome();
     }
     if (S.sheet && S.me) {
-      html += ({ send: function () { return sSend(prefill); }, airtime: sAirtime, bills: sBills, fund: sFund, details: sDetails, profile: sProfile, goal: sGoal }[S.sheet] || function () { return ''; })();
+      html += ({ send: function () { return sSend(prefill); }, airtime: sAirtime, bills: sBills, fund: sFund, details: sDetails, profile: sProfile, goal: sGoal, 'mfa-disable': sMfaDisable }[S.sheet] || function () { return ''; })();
     }
     if (S.me && S.impersonation && S.impersonation.active) html = '<div class="impersonation-banner"><div><b>Admin session · Viewing as customer</b><small>Administrator: '+esc(S.impersonation.admin_email||'')+'</small></div><button type="button" data-act="return-admin">Return to Admin</button></div>'+html;
     app.innerHTML = html;
@@ -407,6 +422,9 @@
     if (a === 'read-all') { api('POST','/api/notifications/read-all',{}).then(function(){return load();}).then(render).catch(function(e){toast(e.message);}); return; }
     if (a === 'cancel-schedule') { if(!confirm('Cancel this scheduled transfer?'))return; api('POST','/api/transfers/scheduled/'+t.dataset.id+'/cancel',{}).then(function(){return load();}).then(render).catch(function(e){toast(e.message);}); return; }
 
+
+    if (a === 'mfa-start') { api('POST','/api/security/mfa/start',{}).then(function(d){mfaChallengeId=d.challenge_id;S.view='mfa-setup';render();toast('Verification code sent to your email');}).catch(function(e){toast(e.message);});return; }
+    if (a === 'mfa-disable') { return openSheet('mfa-disable'); }
     if (a === 'revoke-session') { var sid=t.dataset.id, current=S.sessions.some(function(x){return x.id===sid&&x.current;}); if(!confirm(current?'Sign out this device now?':'Revoke this device session?'))return; api('POST','/api/security/sessions/'+sid+'/revoke',{}).then(function(){if(current){S.me=null;S.txs=[];S.benes=[];S.view='welcome';render();toast('This session was signed out');}else return api('GET','/api/security/sessions').then(function(d){S.sessions=d.sessions||[];render();toast('Session revoked');});}).catch(function(e){toast(e.message);});return; }
     if (a === 'revoke-others') { if(!confirm('Sign out all other devices?'))return; api('POST','/api/security/sessions/revoke-others',{}).then(function(){return api('GET','/api/security/sessions');}).then(function(d){S.sessions=d.sessions||[];render();toast('Other devices signed out');}).catch(function(e){toast(e.message);});return; }
     if (a === 'remove-beneficiary') { api('DELETE','/api/beneficiaries/saved/'+t.dataset.id).then(function(){return load();}).then(render).catch(function(e){toast(e.message);}); return; }
@@ -448,6 +466,9 @@
     var d = {}; new FormData(form).forEach(function (v, k) { d[k] = typeof v === 'string' ? v.trim() : v; });
     setErr(form, ''); busy(form, true);
     var p;
+    if (kind === 'mfa-login') p=api('POST','/api/auth/mfa/verify',{challenge_id:mfaChallengeId,code:d.code});
+    else if (kind === 'mfa-setup') p=api('POST','/api/security/mfa/confirm',{challenge_id:mfaChallengeId,code:d.code});
+    else if (kind === 'mfa-disable') p=api('POST','/api/security/mfa/disable',{password:d.password,pin:d.pin});
     if (kind === 'forgot') p=api('POST','/api/auth/password-reset/request',{email:d.email});
     else if (kind === 'reset') {
       if(d.password!==d.confirm){busy(form,false);setErr(form,'Passwords do not match.');return;}
@@ -491,6 +512,10 @@
     else if (kind === 'bills') p = api('POST', '/api/bills', { biller: d.biller, reference: d.reference, amount: d.amount, pin: d.pin }, S.idem);
     else return;
     p.then(function (res) {
+      if (kind === 'login' && res.mfa_required) { mfaChallengeId=res.challenge_id;S.view='mfa-login';render();toast('Check your email for the sign-in code');return; }
+      if (kind === 'mfa-login') { mfaChallengeId='';return load().then(function(){S.view=S.me.verification_status==='approved'?'home':'verification';render();toast('Signed in securely');}); }
+      if (kind === 'mfa-setup') { mfaChallengeId='';return load().then(function(){S.view='security';render();toast('Multi-factor authentication enabled');}); }
+      if (kind === 'mfa-disable') return load().then(function(){S.sheet=null;S.view='security';render();toast('Multi-factor authentication disabled');});
       if (kind === 'forgot') { S.view='login';render();toast('If your account exists, recovery instructions were sent.');return; }
       if (kind === 'reset') { resetToken='';try{history.replaceState(null,'',location.pathname);}catch(_){} S.view='login';render();toast('Password updated. Sign in with your new password.');return; }
       if (kind === 'support') return api('GET','/api/support/messages').then(function(d){S.support=d;render();toast('Message sent to support');});
