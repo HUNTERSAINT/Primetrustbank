@@ -90,6 +90,8 @@ function newAccountNumber() {
   }
 }
 function cardNumber() { return String(crypto.randomInt(1000, 9999)); }
+function demoCardNumber(){const base='400000'+String(crypto.randomInt(100000000,999999999));let sum=0,alt=true;for(let i=base.length-1;i>=0;i--){let n=Number(base[i]);if(alt){n*=2;if(n>9)n-=9;}sum+=n;alt=!alt;}return base+String((10-(sum%10))%10);}
+
 
 function issueSession(res, userId, req) {
   const row = db.prepare('SELECT session_version FROM users WHERE id = ?').get(userId);
@@ -382,12 +384,13 @@ app.get('/api/admin/users', adminAuth, wrap((req,res)=>{
 }));
 app.get('/api/admin/users/:id', adminAuth, wrap((req,res)=>{
   const id=Number(req.params.id); if(!Number.isSafeInteger(id)||id<1) throw httpErr(400,'Invalid customer ID.');
-  const user=db.prepare("SELECT u.id,u.full_name,u.email,u.status,u.verification_status,u.verification_submitted_at,u.created_at,a.id account_id,a.account_number,a.currency,a.balance,c.last4,c.expiry,c.frozen FROM users u JOIN accounts a ON a.user_id=u.id AND a.kind='user' LEFT JOIN cards c ON c.account_id=a.id WHERE u.id=?").get(id);
+  const user=db.prepare("SELECT u.id,u.full_name,u.email,u.status,u.verification_status,u.verification_submitted_at,u.created_at,a.id account_id,a.account_number,a.currency,a.balance,c.last4,c.expiry,c.frozen,c.demo_number FROM users u JOIN accounts a ON a.user_id=u.id AND a.kind='user' LEFT JOIN cards c ON c.account_id=a.id WHERE u.id=?").get(id);
+  const cardRequest=db.prepare('SELECT status,requested_at,reviewed_at,reviewed_by FROM card_requests WHERE user_id=?').get(id)||null;
   if(!user) throw httpErr(404,'Customer not found.');
   const transactions=db.prepare("SELECT id,type,amount,balance_after,counterparty,note,created_at FROM transactions WHERE account_id=? ORDER BY id DESC LIMIT 30").all(user.account_id);
   const verification=db.prepare("SELECT id,legal_name,date_of_birth,address,id_type,review_status,admin_note,submitted_at,reviewed_at FROM verification_requests WHERE user_id=?").get(id)||null;
   const audit=db.prepare("SELECT action,amount,details,created_at FROM admin_audit WHERE target_user_id=? ORDER BY id DESC LIMIT 12").all(id);
-  res.json({user,transactions,verification,audit});
+  res.json({user,cardRequest,transactions,verification,audit});
 }));
 app.patch('/api/admin/users/:id', adminAuth, wrap((req,res)=>{
   const id=Number(req.params.id), status=String((req.body||{}).status||'');
@@ -413,6 +416,16 @@ app.post('/api/admin/users/:id/adjust-balance', adminAuth, wrap((req,res)=>{
   res.json({ok:true,balance:result.balance});
 }));
 
+app.post('/api/admin/users/:id/card/issue',adminAuth,wrap((req,res)=>{
+ const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid customer ID.');
+ const account=db.prepare("SELECT a.id FROM accounts a WHERE a.user_id=? AND a.kind='user'").get(id);if(!account)throw httpErr(404,'Customer account not found.');
+ const rq=db.prepare("SELECT status FROM card_requests WHERE user_id=?").get(id);if(!rq||rq.status!=='pending')throw httpErr(409,'Customer must request a card before it can be granted.');
+ if(db.prepare('SELECT 1 FROM cards WHERE account_id=?').get(account.id))throw httpErr(409,'Card already issued.');
+ const number=demoCardNumber(),exp=new Date();exp.setFullYear(exp.getFullYear()+4);const expiry=String(exp.getMonth()+1).padStart(2,'0')+'/'+String(exp.getFullYear()).slice(2);
+ db.transaction(()=>{db.prepare('INSERT INTO cards (account_id,last4,expiry,demo_number,activated) VALUES (?,?,?,?,0)').run(account.id,number.slice(-4),expiry,number);db.prepare("UPDATE card_requests SET status='granted',reviewed_at=?,reviewed_by=? WHERE user_id=?").run(now(),String(req.admin.email||'admin'),id);auditAdmin(req,'CARD_GRANTED',id,null,'Admin granted requested demo card');})();
+ notifyUser(id,'Demo card granted','An administrator approved your card request. Your demo card is now available.','card');res.json({ok:true,last4:number.slice(-4),expiry});
+}));
+app.post('/api/admin/users/:id/card/reject',adminAuth,wrap((req,res)=>{const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid customer ID.');const rq=db.prepare("SELECT status FROM card_requests WHERE user_id=?").get(id);if(!rq||rq.status!=='pending')throw httpErr(409,'No pending card request.');db.prepare("UPDATE card_requests SET status='rejected',reviewed_at=?,reviewed_by=? WHERE user_id=?").run(now(),String(req.admin.email||'admin'),id);auditAdmin(req,'CARD_REQUEST_REJECTED',id,null,'Admin rejected card request');notifyUser(id,'Card request update','Your card request was not approved. Contact support if you need more information.','card');res.json({ok:true});}));
 app.patch('/api/admin/users/:id/card', adminAuth, wrap((req,res)=>{
   const id=Number(req.params.id), frozen=(req.body||{}).frozen;
   if(!Number.isSafeInteger(id)||id<1||typeof frozen!=='boolean')throw httpErr(400,'Choose a valid card control.');
@@ -604,9 +617,7 @@ app.post('/api/auth/register', authLimiter, wrap((req, res) => {
       .run(em, name, ph, pinh, submittedAt, submittedAt).lastInsertRowid;
     const a = db.prepare("INSERT INTO accounts (user_id, account_number, kind) VALUES (?,?, 'user')")
       .run(u, newAccountNumber()).lastInsertRowid;
-    const exp = new Date(); exp.setFullYear(exp.getFullYear() + 4);
-    db.prepare('INSERT INTO cards (account_id, last4, expiry) VALUES (?,?,?)')
-      .run(a, cardNumber(), String(exp.getMonth() + 1).padStart(2, '0') + '/' + String(exp.getFullYear()).slice(2));
+    // Card is issued only after customer request and administrator approval.
     db.prepare("INSERT INTO verification_requests (user_id, legal_name, date_of_birth, address, id_type, review_status, submitted_at, id_front_data, id_back_data, selfie_data) VALUES (?,?,?,?,?,'submitted',?,?,?,?)")
       .run(u, legalName, dob, address, idType, submittedAt, sealKyc(front), sealKyc(back || null), sealKyc(selfie || null));
     return u;
@@ -733,13 +744,12 @@ app.get('/api/impersonation/status', auth, wrap((req,res)=>{
 
 app.get('/api/me', auth, wrap((req, res) => {
   if(req.user.verification_status==='approved')processDueTransfers(req.user.id);
-  const card = db.prepare('SELECT last4, expiry, frozen, activated, online_enabled, international_enabled, daily_limit, card_pin_hash FROM cards WHERE account_id = ?').get(req.account.id);
-  res.json({
-    name: req.user.full_name, email: req.user.email, verification_status: req.user.verification_status, mfa_enabled: !!req.user.mfa_enabled,
-    account: { number: req.account.account_number, currency: req.account.currency, balance: req.account.balance },
-    card: { last4: card.last4, expiry: card.expiry, frozen: !!card.frozen, activated: !!card.activated, online_enabled: !!card.online_enabled, international_enabled: !!card.international_enabled, daily_limit: card.daily_limit, card_pin_set: !!card.card_pin_hash },
-    sandbox_funding: SANDBOX_FUNDING
-  });
+  const card=db.prepare('SELECT last4,expiry,frozen,activated,online_enabled,international_enabled,daily_limit,card_pin_hash FROM cards WHERE account_id=?').get(req.account.id);
+  const cardRequest=db.prepare('SELECT status,requested_at FROM card_requests WHERE user_id=?').get(req.user.id)||null;
+  res.json({name:req.user.full_name,email:req.user.email,verification_status:req.user.verification_status,mfa_enabled:!!req.user.mfa_enabled,
+    account:{number:req.account.account_number,currency:req.account.currency,balance:req.account.balance},
+    card:card?{last4:card.last4,expiry:card.expiry,frozen:!!card.frozen,activated:!!card.activated,online_enabled:!!card.online_enabled,international_enabled:!!card.international_enabled,daily_limit:card.daily_limit,card_pin_set:!!card.card_pin_hash}:null,
+    card_request:cardRequest,sandbox_funding:SANDBOX_FUNDING});
 }));
 
 app.get('/api/transactions', auth, wrap((req, res) => {
@@ -802,27 +812,7 @@ app.post('/api/transfers', auth, requireVerified, moneyLimiter, wrap((req, res) 
 const BILLERS = ['Electricity', 'Cable TV', 'Internet', 'Water', 'School fees'];
 const NETWORKS = ['MTN', 'Airtel', 'Glo', '9mobile'];
 
-app.post('/api/airtime', auth, requireVerified, moneyLimiter, wrap((req, res) => {
-  idempotent(req, res, () => {
-    const { network, phone, amount, pin } = req.body || {};
-    const amt = cents(amount);
-    if (!amt || amt > 500 * 100) throw httpErr(400, 'Airtime must be between 0.01 and 500.');
-    const payLimitRow=db.prepare('SELECT daily_payment_limit FROM account_limits WHERE user_id=?').get(req.user.id);
-    const payLimit=payLimitRow?payLimitRow.daily_payment_limit:100000;
-    const dayStart=new Date();dayStart.setHours(0,0,0,0);
-    const payUsed=db.prepare("SELECT COALESCE(SUM(-amount),0) total FROM transactions WHERE account_id=? AND type IN ('airtime','bill') AND created_at>=?").get(req.account.id,dayStart.getTime()).total;
-    if(amt>payLimit||payUsed+amt>payLimit)throw httpErr(422,'Your daily payment limit would be exceeded.');
-    if (!NETWORKS.includes(network)) throw httpErr(400, 'Choose a network.');
-    if (!/^\+?\d{8,15}$/.test(String(phone || ''))) throw httpErr(400, 'Enter a valid phone number.');
-    verifyPin(req.user, pin);
-    const sys = db.prepare("SELECT * FROM accounts WHERE account_number = 'SYS-BILLERS'").get();
-    const out = db.transaction(() => move({
-      from: req.account, to: sys, amount: amt, typeOut: 'airtime', typeIn: 'airtime_in',
-      counterOut: network + ' airtime', counterIn: req.user.full_name, note: 'phone:' + phone
-    }))();
-    return { ok: true, balance: out.balance };
-  });
-}));
+// Airtime purchase removed from this demo app.
 
 app.post('/api/bills', auth, requireVerified, moneyLimiter, wrap((req, res) => {
   idempotent(req, res, () => {
@@ -865,11 +855,22 @@ app.post('/api/deposit', auth, requireVerified, moneyLimiter, wrap((req, res) =>
   });
 }));
 
+app.post('/api/card/request',auth,requireVerified,sensitiveWriteLimiter,wrap((req,res)=>{
+ if(db.prepare('SELECT 1 FROM cards WHERE account_id=?').get(req.account.id))throw httpErr(409,'A card has already been issued.');
+ const old=db.prepare('SELECT status FROM card_requests WHERE user_id=?').get(req.user.id);
+ if(old&&old.status==='pending')throw httpErr(409,'Your card request is already awaiting administrator review.');
+ db.prepare("INSERT INTO card_requests (user_id,status,requested_at) VALUES (?,'pending',?) ON CONFLICT(user_id) DO UPDATE SET status='pending',requested_at=excluded.requested_at,reviewed_at=NULL,reviewed_by=NULL").run(req.user.id,now());
+ notifyUser(req.user.id,'Card request received','Your card request is awaiting administrator approval.','card');
+ res.status(201).json({ok:true,status:'pending'});
+}));
 app.get('/api/card/settings',auth,requireVerified,wrap((req,res)=>{
-  const c=db.prepare('SELECT activated,online_enabled,international_enabled,daily_limit,card_pin_hash,frozen FROM cards WHERE account_id=?').get(req.account.id);
-  res.json({settings:{activated:!!c.activated,online_enabled:!!c.online_enabled,international_enabled:!!c.international_enabled,daily_limit:c.daily_limit,card_pin_set:!!c.card_pin_hash,frozen:!!c.frozen}});
+ const c=db.prepare('SELECT activated,online_enabled,international_enabled,daily_limit,card_pin_hash,frozen FROM cards WHERE account_id=?').get(req.account.id);
+ if(!c)throw httpErr(404,'No card has been issued to this account yet.');
+ res.json({settings:{activated:!!c.activated,online_enabled:!!c.online_enabled,international_enabled:!!c.international_enabled,daily_limit:c.daily_limit,card_pin_set:!!c.card_pin_hash,frozen:!!c.frozen}});
 }));
 app.patch('/api/card/settings',auth,requireVerified,sensitiveWriteLimiter,wrap((req,res)=>{
+  if(!db.prepare('SELECT 1 FROM cards WHERE account_id=?').get(req.account.id))throw httpErr(404,'No card has been issued to this account yet.');
+
   const b=req.body||{},limit=Number(b.daily_limit);
   if(typeof b.activated!=='boolean'||typeof b.online_enabled!=='boolean'||typeof b.international_enabled!=='boolean'||!Number.isSafeInteger(limit)||limit<10000||limit>10000000)throw httpErr(400,'Choose valid card settings and a daily limit between USD 100 and USD 100,000.');
   verifyPin(req.user,String(b.transaction_pin||''));
@@ -877,6 +878,8 @@ app.patch('/api/card/settings',auth,requireVerified,sensitiveWriteLimiter,wrap((
   res.json({ok:true});
 }));
 app.post('/api/card/pin',auth,requireVerified,sensitiveWriteLimiter,wrap((req,res)=>{
+  if(!db.prepare('SELECT 1 FROM cards WHERE account_id=?').get(req.account.id))throw httpErr(404,'No card has been issued to this account yet.');
+
   const b=req.body||{},pin=String(b.card_pin||'');
   verifyPin(req.user,String(b.transaction_pin||''));
   if(!/^\d{4}$/.test(pin))throw httpErr(400,'Card PIN must be exactly 4 digits.');
@@ -884,6 +887,8 @@ app.post('/api/card/pin',auth,requireVerified,sensitiveWriteLimiter,wrap((req,re
   res.json({ok:true});
 }));
 app.post('/api/card/replace',auth,requireVerified,sensitiveWriteLimiter,wrap((req,res)=>{
+  if(!db.prepare('SELECT 1 FROM cards WHERE account_id=?').get(req.account.id))throw httpErr(404,'No card has been issued to this account yet.');
+
   verifyPin(req.user,String((req.body||{}).transaction_pin||''));
   const exp=new Date();exp.setFullYear(exp.getFullYear()+4);
   const expiry=String(exp.getMonth()+1).padStart(2,'0')+'/'+String(exp.getFullYear()).slice(2),last4=cardNumber();
@@ -892,6 +897,8 @@ app.post('/api/card/replace',auth,requireVerified,sensitiveWriteLimiter,wrap((re
   res.json({ok:true,last4,expiry});
 }));
 app.post('/api/card/freeze', auth, requireVerified, wrap((req, res) => {
+  if(!db.prepare('SELECT 1 FROM cards WHERE account_id=?').get(req.account.id))throw httpErr(404,'No card has been issued to this account yet.');
+
   const frozen = (req.body || {}).frozen ? 1 : 0;
   db.prepare('UPDATE cards SET frozen = ? WHERE account_id = ?').run(frozen, req.account.id);
   res.json({ ok: true, frozen: !!frozen });
