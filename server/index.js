@@ -761,7 +761,7 @@ if (ADMIN_PORTAL_PATH_VALID) {
   app.get(ADMIN_PORTAL_PATH, (req, res) => {
     const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'admin.html'), 'utf8');
     const scriptPath = ADMIN_PORTAL_PATH + '.js';
-    const securedHtml = html.replace(/<script src="\\/admin\\.js[^"]*"><\\/script>/, '<script src="' + scriptPath + '?v=secure-admin-01"></script>');
+    const securedHtml = html.replace('src="/admin.js?v=admin-novacrest-copy-07"', 'src="' + scriptPath + '?v=secure-admin-01"');
     res.set('Cache-Control', 'no-store, private');
     res.type('html').send(securedHtml);
   });
