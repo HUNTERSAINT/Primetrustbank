@@ -511,8 +511,8 @@
 
   // ---------- boot ----------
   api('GET', '/api/meta').then(function (m) { S.meta = m; }).catch(function () {})
-    .then(function () { return load(); })
-    .then(function () { S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; })
+    .then(function () { if(resetToken){S.view='reset';return null;} return load(); })
+    .then(function () { if(resetToken)return; S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; })
     .catch(function () { S.me = null; S.view = resetToken ? 'reset' : 'welcome'; })
     .then(function () { render(); });
 })();
