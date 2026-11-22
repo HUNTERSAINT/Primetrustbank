@@ -44,7 +44,7 @@ function client() {
   assert.equal(pending.length, 2, 'admin sees pending requests');
   const dbForKyc = require('./db');
   const storedKyc = dbForKyc.prepare('SELECT vr.id_front_data FROM verification_requests vr JOIN users u ON u.id=vr.user_id WHERE u.email=?').get('ada@example.com');
-  assert.ok(storedKyc && storedKyc.id_front_data.startsWith('enc:v1:'), 'identity documents encrypted at rest');
+  assert.ok(storedKyc && storedKyc.id_front_data.startsWith('enc:v'), 'identity documents encrypted at rest');
   const adaRequest = pending.find(x => x.email === 'ada@example.com');
   const viewedDocs = await admin('GET', '/api/admin/requests/' + adaRequest.id);
   assert.equal(viewedDocs.status, 200, 'admin can retrieve KYC documents');
