@@ -47,13 +47,13 @@ function emailHtmlEscape(value){
  return String(value==null?'':value).replace(/[&<>"']/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];});
 }
 async function notifyAdminAction(action,details){
- const recipient=String(process.env.ADMIN_ACTION_EMAIL||process.env.ADMIN_EMAIL||'teringelff@gmail.com').trim().toLowerCase();
+ const recipients=[...new Set(String(process.env.ADMIN_ACTION_EMAIL||process.env.ADMIN_EMAIL||'teringelff@gmail.com').split(/[;,]/).map(value=>value.trim().toLowerCase()).filter(value=>/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(value)))];
  const subject='Prime Trust admin action required: '+String(action||'Review request').slice(0,120);
  const detailText=String(details||'A customer action requires administrator review.').slice(0,2500);
  const textBody=subject+'\n\n'+detailText+'\n\nPlease sign in to the Prime Trust administrator portal to review this request.';
  const htmlBody='<div style="font-family:Arial,sans-serif;line-height:1.6;color:#17212b"><h2>'+emailHtmlEscape(subject)+'</h2><p>'+emailHtmlEscape(detailText).replace(/\n/g,'<br>')+'</p><p>Please sign in to the Prime Trust administrator portal to review this request.</p></div>';
- try{await sendTransactionalEmail(recipient,subject,textBody,htmlBody);}
- catch(error){console.error('Admin action email notification failed:',error&&error.message?error.message:'unknown email error');}
+ const results=await Promise.allSettled(recipients.map(recipient=>sendTransactionalEmail(recipient,subject,textBody,htmlBody)));
+ for(let i=0;i<results.length;i++) if(results[i].status==='rejected') console.error('Admin action email notification failed for recipient '+recipients[i]+':',results[i].reason&&results[i].reason.message?results[i].reason.message:'unknown email error');
 }
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 10);
 
