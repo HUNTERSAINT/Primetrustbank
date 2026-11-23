@@ -170,9 +170,8 @@ function client() {
   assert.match(meB.account.number, /^\d{10}$/);
 
   r = await a('POST', '/api/deposit', { amount: 500 });
-  assert.equal(r.body.balance, 50000, 'deposit 500.00');
-  r = await a('POST', '/api/deposit', { amount: 5000 });
-  assert.equal(r.status, 400, 'sandbox deposit cap');
+  assert.equal(r.status, 410, 'legacy test-fund deposit endpoint is disabled');
+  assert.equal((await a('GET', '/api/me')).body.account.balance, 0, 'legacy deposit endpoint cannot credit test funds');
 
   r = await a('POST', '/api/transfers', { to_account: meB.account.number, amount: 200, pin: '0000' });
   assert.equal(r.status, 403, 'wrong PIN rejected');
