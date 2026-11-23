@@ -1086,7 +1086,10 @@ app.post('/api/external-transfers', auth, requireVerified, moneyLimiter, wrap(as
     if(/^[0-9]{9}$/.test(routing)){aba=3*(Number(routing[0])+Number(routing[3])+Number(routing[6]))+7*(Number(routing[1])+Number(routing[4])+Number(routing[7]))+(Number(routing[2])+Number(routing[5])+Number(routing[8]));}
     if(!['ach','wire','international'].includes(method)||bank.length<2||name.length<2)throw httpErr(400,'Enter a valid transfer method, bank and beneficiary full legal name.');
     if(method==='international'){
-      if(!/^[A-Z0-9]{8}([A-Z0-9]{3})?$/.test(swift)||!(/^[A-Z0-9]{4,34}$/.test(iban)||/^[A-Z0-9]{4,34}$/.test(acctIntl)))throw httpErr(400,'Enter a valid SWIFT/BIC and either an IBAN or international account number.');
+      if(!/^[A-Z0-9]{8}([A-Z0-9]{3})?$/.test(swift))throw httpErr(400,'SWIFT/BIC field: enter the bank\'s 8- or 11-character SWIFT/BIC code.');
+      if(iban&&!(/^[A-Z0-9]{4,34}$/.test(iban)))throw httpErr(400,'IBAN field: remove spaces and enter a valid IBAN (4–34 letters or numbers).');
+      if(!iban&&!acctIntl)throw httpErr(400,'IBAN / Account number field: enter an IBAN or international account number.');
+      if(!iban&&acctIntl&&!(/^[A-Z0-9]{4,34}$/.test(acctIntl)))throw httpErr(400,'Account number field: use 4–34 letters or numbers, without spaces or punctuation.');
       if(bankAddress.length<5)throw httpErr(400,'Please enter the bank address (at least 5 characters).');
       if(bankCountry.length<2)throw httpErr(400,'Please select or enter the bank country.');
       if(bankCity.length<2)throw httpErr(400,'Please enter the bank city.');
