@@ -23,9 +23,9 @@ function ageOn(dob, today) {
 }
 function validImage(value, required) {
   if (!value) return !required;
-  if (value.length > 1500000 || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) return false;
+  if (value.length > 4400000 || !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) return false;
   const data = value.slice(value.indexOf(',') + 1);
-  return data.length > 0 && Buffer.from(data, 'base64').length <= 1100000;
+  return data.length > 0 && Buffer.from(data, 'base64').length <= 3200000;
 }
 
 // Validates and normalises the KYC part of a request body. Throws a 400 through `httpErr` when something is wrong.
