@@ -88,29 +88,29 @@ function verifyResendWebhook(req) {
   const secret=String(process.env.RESEND_WEBHOOK_SECRET||'');
   if(!secret||!req.rawBody) return false;
   const id=String(req.get('svix-id')||''), timestamp=String(req.get('svix-timestamp')||''), signature=String(req.get('svix-signature')||'');
-  if(!id||!timestamp||!signature||!/^\\d+$/.test(timestamp)) return false;
+  if(!id||!timestamp||!signature||!/^\d+$/.test(timestamp)) return false;
   const ts=Number(timestamp); if(!Number.isFinite(ts)||Math.abs(Date.now()/1000-ts)>300) return false;
   let key; try { key=Buffer.from(secret.replace(/^whsec_/,''),'base64'); } catch { return false; }
   const expected=crypto.createHmac('sha256',key).update(id+'.'+timestamp+'.').update(req.rawBody).digest('base64');
   return signature.split(' ').some(part=>{const m=part.match(/^v1,([A-Za-z0-9+/=]+)$/);if(!m)return false;const a=Buffer.from(m[1]),b=Buffer.from(expected);return a.length===b.length&&crypto.timingSafeEqual(a,b);});
 }
 function plainEmailBody(value) {
-  return String(value||'').replace(/<\\s*(script|style)[^>]*>[\\s\\S]*?<\\s*\\/\\s*\\1\\s*>/gi,' ')
-    .replace(/<\\/p\\s*>|<\\/div\\s*>|<br\\s*\\/?>/gi,'\\n').replace(/<[^>]+>/g,' ')
+  return String(value||'').replace(/<\s*(script|style)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi,' ')
+    .replace(/<\/p\s*>|<\/div\s*>|<br\s*\/?>/gi,'\n').replace(/<[^>]+>/g,' ')
     .replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&lt;/gi,'<').replace(/&gt;/gi,'>')
-    .replace(/&#39;/gi,"'").replace(/&quot;/gi,'"').replace(/[\\t ]+/g,' ').replace(/\\n[ \\t]+/g,'\\n').trim().slice(0,10000);
+    .replace(/&#39;/gi,"'").replace(/&quot;/gi,'"').replace(/[\t ]+/g,' ').replace(/\n[ \t]+/g,'\n').trim().slice(0,10000);
 }
 function emailAddress(value) {
-  const s=String(value||''); const m=s.match(/<([^<>\\s]+@[^<>\\s]+)>/)||s.match(/([A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,})/i);
+  const s=String(value||''); const m=s.match(/<([^<>\s]+@[^<>\s]+)>/)||s.match(/([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i);
   return m?m[1].toLowerCase():'';
 }
 async function sendSupportEmail(to,sessionId,subject,message) {
   const apiKey=process.env.RESEND_API_KEY,from=process.env.RESEND_FROM_EMAIL||process.env.EMAIL_FROM;
   if(!apiKey||!from)throw httpErr(503,'Support email delivery is not configured.');
-  const safe=String(message).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])).replace(/\\r?\\n/g,'<br>');
+  const safe=String(message).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])).replace(/\r?\n/g,'<br>');
   const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({
-    from,reply_to:['support@primetrustdigital.org'],to:[to],subject:'Re: [PT Support #'+sessionId+'] '+String(subject||'Support request').replace(/^\\s*\\[PT Support #\\d+\\]\\s*/i,'').slice(0,150),
-    text:String(message)+'\\n\\nPrime Trust Digital Support\\nReference: PT Support #'+sessionId,
+    from,reply_to:['support@primetrustdigital.org'],to:[to],subject:'Re: [PT Support #'+sessionId+'] '+String(subject||'Support request').replace(/^\s*\[PT Support #\d+\]\s*/i,'').slice(0,150),
+    text:String(message)+'\n\nPrime Trust Digital Support\nReference: PT Support #'+sessionId,
     html:'<!doctype html><html><body style="font-family:Arial,sans-serif;line-height:1.65;color:#18323a"><h2>Prime Trust Digital Support</h2><p>'+safe+'</p><p style="color:#647a80">Reply to this email to continue your support conversation.<br>Reference: PT Support #'+sessionId+'</p></body></html>'
   })});
   if(!response.ok)throw httpErr(502,'The reply was saved in chat, but email delivery failed.');
@@ -138,7 +138,7 @@ app.post('/api/webhooks/resend/inbound-support',wrap(async(req,res)=>{
   const text=plainEmailBody(email.text||email.body||email.html||data.text||data.html||'');
   if(!text)return res.status(200).json({ok:true,ignored:true});
   if(messageId&&await db.get('SELECT id FROM support_messages WHERE provider_message_id=?',[messageId]))return res.status(200).json({ok:true,duplicate:true});
-  const ticket=(subject.match(/\\[PT Support #(\\d+)\\]/i)||[])[1], ticketId=ticket?Number(ticket):0;
+  const ticket=(subject.match(/\[PT Support #(\d+)\]/i)||[])[1], ticketId=ticket?Number(ticket):0;
   let session=ticketId?await db.get('SELECT * FROM support_sessions WHERE id=?',[ticketId]):null;
   if(session&&session.contact_email&&session.contact_email.toLowerCase()!==sender)session=null;
   const user=await db.get('SELECT id,full_name,email FROM users WHERE lower(email)=?',[sender]);
