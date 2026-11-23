@@ -10,10 +10,14 @@ process.env.RESEND_FROM_EMAIL = 'Prime Trust <mail@primetrustdigital.org>';
 process.env.RESEND_REPLY_TO = 'reply@primetrustdigital.org';
 const webhookKey = Buffer.from('support-webhook-test-secret-32-bytes').toString('base64');
 process.env.RESEND_WEBHOOK_SECRET = 'whsec_' + webhookKey;
+process.env.RESEND_SUPPORT_INBOX_ID = 'support-inbox-test-id';
 const sentEmails = [];
 const emailCodes = Object.create(null);
 const realFetch = global.fetch;
 global.fetch = async (url, options) => {
+  if (String(url).startsWith('https://api.resend.com/inboxes/')) {
+    return new Response(JSON.stringify({data:{from:'Guest Customer <visitor@example.com>',to:['support@primetrustdigital.org'],subject:'Need support',text:'I cannot access my account.',headers:{'message-id':'<guest-inbox-1@example.com>'}}}),{status:200,headers:{'content-type':'application/json'}});
+  }
   if (String(url).startsWith('https://api.resend.com/emails')) {
     const payload = JSON.parse(options.body || '{}');
     sentEmails.push(payload);
@@ -81,6 +85,11 @@ function client() {
   inbound=await inboundSupport({type:'email.received',data:{from:'Ada Okafor <ada@example.com>',to:['support@primetrustdigital.org'],subject:'Re: [PT Support #'+supportSession.id+'] My support request',text:'Following up from email.',headers:{'message-id':'<ada-support-2@example.com>'}}},'evt-support-2');
   assert.equal(inbound.status,200,'customer email reply continues the same ticket');
   assert.equal((await require('./db').get('SELECT COUNT(*) n FROM support_messages WHERE session_id=?',[supportSession.id])).n,2,'email replies are appended to the existing chat');
+  inbound=await inboundSupport({type:'inbox.email.received',data:{inbox_id:process.env.RESEND_SUPPORT_INBOX_ID,thread_id:'inbox-thread-guest',email_id:'inbox-email-guest',email:{from:'Guest Customer <visitor@example.com>',to:['support@primetrustdigital.org'],subject:'Need support',message_id:'<guest-inbox-1@example.com>'}}},'evt-support-inbox-guest');
+  assert.equal(inbound.status,200,'Resend inbox received event creates a guest support chat');
+  const guestSession=await require('./db').get('SELECT * FROM support_sessions WHERE contact_email=?',['visitor@example.com']);
+  assert.ok(guestSession&&!guestSession.user_id,'email-only customer gets a guest chat session');
+  assert.equal((await require('./db').get('SELECT COUNT(*) n FROM support_messages WHERE session_id=?',[guestSession.id])).n,1,'guest email body is retrieved and stored');
   // KYC input rules are checked only after email verification.
   const bad = async (patch, why) => { const x = await a('POST', '/api/verification/submit', { ...registrationKycA, ...patch }); assert.equal(x.status, 400, why + ' -> ' + JSON.stringify(x.body)); };
   await bad({ date_of_birth: new Date(Date.now() - 17 * 365.25 * 864e5).toISOString().slice(0, 10) }, 'under 18 rejected');
@@ -100,6 +109,11 @@ function client() {
   assert.equal(r.status, 200, 'administrator login');
   const supportList=(await admin('GET','/api/admin/chat/sessions')).body.sessions;
   assert.ok(supportList.some(x=>x.id===supportSession.id&&x.email==='ada@example.com'),'admin sees email-originated chat');
+  assert.ok(supportList.some(x=>x.id===guestSession.id&&x.email==='visitor@example.com'),'admin sees guest email chat');
+  r=await admin('POST','/api/admin/chat/sessions/'+guestSession.id+'/reply',{message:'Hello, we can help you.'});
+  assert.equal(r.status,200,'admin can reply to guest email support');
+  assert.equal(r.body.emailSent,true,'guest reply is sent by email');
+  assert.ok(sentEmails.some(x=>x.to&&x.to[0]==='visitor@example.com'&&String(x.subject).includes('[PT Support #'+guestSession.id+']')),'guest support email contains ticket marker for reply threading');
   r=await admin('POST','/api/admin/chat/sessions/'+supportSession.id+'/reply',{message:'We received your request and are checking it.'});
   assert.equal(r.status,200,'admin reply is posted to chat');
   assert.equal(r.body.emailSent,true,'admin reply is also sent by email');
