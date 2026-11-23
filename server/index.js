@@ -60,7 +60,7 @@ app.use(helmet({
   }
 }));
 app.use((req, res, next) => { db.ready.then(() => next(), next); });
-app.use(express.json({ limit: '5mb', strict: true }));
+app.use(express.json({ limit: '5mb', strict: true, verify: (req, res, buf) => { req.rawBody = Buffer.from(buf); } }));
 app.use(cookieParser());
 app.use('/api', (req,res,next)=>{ res.set('Cache-Control','no-store, private'); res.set('Pragma','no-cache'); next(); });
 
@@ -84,6 +84,78 @@ const wrap = (fn) => (req, res) => {
   try { Promise.resolve(fn(req, res)).catch(handle); } catch (e) { handle(e); }
 };
 const httpErr = (status, message) => Object.assign(new Error(message), { status });
+function verifyResendWebhook(req) {
+  const secret=String(process.env.RESEND_WEBHOOK_SECRET||'');
+  if(!secret||!req.rawBody) return false;
+  const id=String(req.get('svix-id')||''), timestamp=String(req.get('svix-timestamp')||''), signature=String(req.get('svix-signature')||'');
+  if(!id||!timestamp||!signature||!/^\\d+$/.test(timestamp)) return false;
+  const ts=Number(timestamp); if(!Number.isFinite(ts)||Math.abs(Date.now()/1000-ts)>300) return false;
+  let key; try { key=Buffer.from(secret.replace(/^whsec_/,''),'base64'); } catch { return false; }
+  const expected=crypto.createHmac('sha256',key).update(id+'.'+timestamp+'.').update(req.rawBody).digest('base64');
+  return signature.split(' ').some(part=>{const m=part.match(/^v1,([A-Za-z0-9+/=]+)$/);if(!m)return false;const a=Buffer.from(m[1]),b=Buffer.from(expected);return a.length===b.length&&crypto.timingSafeEqual(a,b);});
+}
+function plainEmailBody(value) {
+  return String(value||'').replace(/<\\s*(script|style)[^>]*>[\\s\\S]*?<\\s*\\/\\s*\\1\\s*>/gi,' ')
+    .replace(/<\\/p\\s*>|<\\/div\\s*>|<br\\s*\\/?>/gi,'\\n').replace(/<[^>]+>/g,' ')
+    .replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&lt;/gi,'<').replace(/&gt;/gi,'>')
+    .replace(/&#39;/gi,"'").replace(/&quot;/gi,'"').replace(/[\\t ]+/g,' ').replace(/\\n[ \\t]+/g,'\\n').trim().slice(0,10000);
+}
+function emailAddress(value) {
+  const s=String(value||''); const m=s.match(/<([^<>\\s]+@[^<>\\s]+)>/)||s.match(/([A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,})/i);
+  return m?m[1].toLowerCase():'';
+}
+async function sendSupportEmail(to,sessionId,subject,message) {
+  const apiKey=process.env.RESEND_API_KEY,from=process.env.RESEND_FROM_EMAIL||process.env.EMAIL_FROM;
+  if(!apiKey||!from)throw httpErr(503,'Support email delivery is not configured.');
+  const safe=String(message).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])).replace(/\\r?\\n/g,'<br>');
+  const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({
+    from,reply_to:['support@primetrustdigital.org'],to:[to],subject:'Re: [PT Support #'+sessionId+'] '+String(subject||'Support request').replace(/^\\s*\\[PT Support #\\d+\\]\\s*/i,'').slice(0,150),
+    text:String(message)+'\\n\\nPrime Trust Digital Support\\nReference: PT Support #'+sessionId,
+    html:'<!doctype html><html><body style="font-family:Arial,sans-serif;line-height:1.65;color:#18323a"><h2>Prime Trust Digital Support</h2><p>'+safe+'</p><p style="color:#647a80">Reply to this email to continue your support conversation.<br>Reference: PT Support #'+sessionId+'</p></body></html>'
+  })});
+  if(!response.ok)throw httpErr(502,'The reply was saved in chat, but email delivery failed.');
+  return (await response.json()).id||null;
+}
+app.post('/api/webhooks/resend/inbound-support',wrap(async(req,res)=>{
+  if(!verifyResendWebhook(req))return fail(res,401,'Invalid webhook signature.');
+  const event=req.body||{},type=String(event.type||''),data=event.data||{};
+  if(!['email.received','inbox.email.received'].includes(type))return res.status(200).json({ok:true,ignored:true});
+  const emailId=String(data.email_id||data.emailId||'');
+  let email=data;
+  if(emailId&&(!data.text&&!data.html&&!data.body)){
+    const apiKey=process.env.RESEND_API_KEY;if(!apiKey)return fail(res,503,'Email receiving is not configured.');
+    const endpoint=type==='email.received'?'https://api.resend.com/emails/receiving/'+encodeURIComponent(emailId):'https://api.resend.com/inboxes/'+encodeURIComponent(data.inbox_id||data.inboxId||'')+'/threads/'+encodeURIComponent(data.thread_id||data.threadId||'')+'/emails/'+encodeURIComponent(emailId);
+    const response=await fetch(endpoint,{headers:{Authorization:'Bearer '+apiKey}});
+    if(!response.ok)throw httpErr(502,'Could not retrieve the received support email.');
+    email=await response.json();
+  }
+  const from=email.from||data.from||'', sender=emailAddress(from);
+  const to=Array.isArray(email.to)?email.to.join(','):String(email.to||data.to||'');
+  if(!sender||!to.toLowerCase().includes('support@primetrustdigital.org'))return res.status(200).json({ok:true,ignored:true});
+  const headers=email.headers||data.headers||{}, header=(name)=>{if(Array.isArray(headers)){const h=headers.find(x=>String(x.name||x.key||'').toLowerCase()===name.toLowerCase());return h?String(h.value||''):'';}return String(headers[name]||headers[name.toLowerCase()]||'');};
+  const messageId=header('message-id')||header('Message-ID')||String(email.message_id||data.message_id||'');
+  const subject=String(email.subject||data.subject||'Support request').slice(0,180);
+  const text=plainEmailBody(email.text||email.body||email.html||data.text||data.html||'');
+  if(!text)return res.status(200).json({ok:true,ignored:true});
+  if(messageId&&await db.get('SELECT id FROM support_messages WHERE provider_message_id=?',[messageId]))return res.status(200).json({ok:true,duplicate:true});
+  const ticket=(subject.match(/\\[PT Support #(\\d+)\\]/i)||[])[1], ticketId=ticket?Number(ticket):0;
+  let session=ticketId?await db.get('SELECT * FROM support_sessions WHERE id=?',[ticketId]):null;
+  if(session&&session.contact_email&&session.contact_email.toLowerCase()!==sender)session=null;
+  const user=await db.get('SELECT id,full_name,email FROM users WHERE lower(email)=?',[sender]);
+  if(!session&&user)session=await db.get('SELECT * FROM support_sessions WHERE user_id=?',[user.id]);
+  if(!session)session=await db.get("SELECT * FROM support_sessions WHERE lower(contact_email)=? AND status='open' ORDER BY updated_at DESC LIMIT 1",[sender]);
+  const t=now();
+  if(!session){
+    const result=await db.run("INSERT INTO support_sessions (user_id,contact_email,contact_name,status,created_at,updated_at) VALUES (?,?,?,'open',?,?)",[user?user.id:null,sender,String(from).replace(/<[^>]+>/g,'').trim().slice(0,100)||sender,t,t]);
+    session=await db.get('SELECT * FROM support_sessions WHERE id=?',[result.lastInsertRowid]);
+  }else{
+    await db.run("UPDATE support_sessions SET status='open',updated_at=?,contact_email=COALESCE(contact_email,?),contact_name=COALESCE(contact_name,?) WHERE id=?",[t,sender,user?user.full_name:String(from).replace(/<[^>]+>/g,'').trim().slice(0,100),session.id]);
+  }
+  await db.run("INSERT INTO support_messages (session_id,sender_role,sender_name,message,is_read,provider_message_id,created_at) VALUES (?,'user',?,?,0,?,?) ON CONFLICT DO NOTHING",[session.id,user?user.full_name:String(from).replace(/<[^>]+>/g,'').trim().slice(0,100)||sender,text,messageId||null,t]);
+  await db.run('UPDATE support_sessions SET updated_at=?,status=\'open\' WHERE id=?',[t,session.id]);
+  res.status(200).json({ok:true,sessionId:session.id});
+}));
+
 
 async function newAccountNumber() {
   for (;;) {
@@ -165,6 +237,7 @@ async function auth(req, res, next) {
 
 // Defense-in-depth CSRF protection: same-origin browser requests only, plus JSON-only writes.
 app.use('/api', (req, res, next) => {
+  if (req.path === '/webhooks/resend/inbound-support') return next();
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
     const origin = req.get('Origin');
     if (origin) {
@@ -514,7 +587,7 @@ app.get('/api/admin/audit', adminAuth, wrap(async (req,res)=>{
   res.json({events:(await db.all("SELECT id,admin_email,action,target_user_id,amount,details,created_at FROM admin_audit ORDER BY id DESC LIMIT ?", [limit]))});
 }));
 app.get('/api/admin/chat/sessions', adminAuth, wrap(async (req,res)=>{
-  const sessions=(await db.all("SELECT s.id,s.user_id,s.status,s.created_at,s.updated_at,u.full_name,u.email,a.account_number,(SELECT message FROM support_messages m WHERE m.session_id=s.id ORDER BY m.id DESC LIMIT 1) last_message,(SELECT created_at FROM support_messages m WHERE m.session_id=s.id ORDER BY m.id DESC LIMIT 1) last_message_at,(SELECT COUNT(*) FROM support_messages m WHERE m.session_id=s.id AND m.sender_role='user' AND m.is_read=0) unread_count FROM support_sessions s JOIN users u ON u.id=s.user_id LEFT JOIN accounts a ON a.user_id=u.id AND a.kind='user' ORDER BY s.updated_at DESC LIMIT 100", []));
+  const sessions=(await db.all("SELECT s.id,s.user_id,s.status,s.created_at,s.updated_at,COALESCE(NULLIF(s.contact_name,''),u.full_name) full_name,COALESCE(NULLIF(s.contact_email,''),u.email) email,a.account_number,(SELECT message FROM support_messages m WHERE m.session_id=s.id ORDER BY m.id DESC LIMIT 1) last_message,(SELECT created_at FROM support_messages m WHERE m.session_id=s.id ORDER BY m.id DESC LIMIT 1) last_message_at,(SELECT COUNT(*) FROM support_messages m WHERE m.session_id=s.id AND m.sender_role='user' AND m.is_read=0) unread_count FROM support_sessions s LEFT JOIN users u ON u.id=s.user_id LEFT JOIN accounts a ON a.user_id=u.id AND a.kind='user' ORDER BY s.updated_at DESC LIMIT 100", []));
   res.json({sessions});
 }));
 app.get('/api/admin/chat/sessions/:id/messages', adminAuth, wrap(async (req,res)=>{
@@ -527,9 +600,13 @@ app.post('/api/admin/chat/sessions/:id/reply', adminAuth, wrap(async (req,res)=>
   const id=Number(req.params.id), message=String((req.body||{}).message||'').trim();
   if(!Number.isSafeInteger(id)||id<1||message.length<1||message.length>2000) throw httpErr(400,'Enter a reply of up to 2,000 characters.');
   const session=(await db.get('SELECT * FROM support_sessions WHERE id=?', [id])); if(!session) throw httpErr(404,'Support conversation not found.');
-  (await db.run("INSERT INTO support_messages (session_id,sender_role,sender_name,message,created_at) VALUES (?,'admin','Prime Trust Support',?,?)", [id,message,now()]));
-  (await db.run("UPDATE support_sessions SET status='open',updated_at=? WHERE id=?", [now(),id]));
-  res.json({ok:true});
+  const t=now(),to=session.contact_email||(session.user_id?(await db.get('SELECT email FROM users WHERE id=?',[session.user_id]))||{}).email:null;
+  const subject='[PT Support #'+id+'] '+String(session.subject||'Support request');
+  const msg=(await db.run("INSERT INTO support_messages (session_id,sender_role,sender_name,message,created_at,email_status) VALUES (?,'admin','Prime Trust Support',?,?,?)", [id,message,t,to?'pending':'not_available'])).lastInsertRowid;
+  (await db.run("UPDATE support_sessions SET status='open',updated_at=? WHERE id=?", [t,id]));
+  let emailSent=false,resendId=null;
+  if(to){try{resendId=await sendSupportEmail(to,id,subject,message);emailSent=true;await db.run("UPDATE support_messages SET email_status='sent',resend_email_id=? WHERE id=?",[resendId,msg]);}catch(e){await db.run("UPDATE support_messages SET email_status='failed' WHERE id=?",[msg]);}}
+  res.json({ok:true,emailSent,emailError:emailSent?null:(to?'Email delivery failed':'No customer email address is attached')});
 }));
 app.patch('/api/admin/chat/sessions/:id/close', adminAuth, wrap(async (req,res)=>{
   const id=Number(req.params.id); if(!Number.isSafeInteger(id)||id<1) throw httpErr(400,'Invalid support session.');
