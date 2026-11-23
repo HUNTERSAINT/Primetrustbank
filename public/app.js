@@ -134,28 +134,29 @@
       var url, settled = false;
       function rawFallback(){
         return new Promise(function(resolveRaw,rejectRaw){
-          if(!file || file.size>10485760){rejectRaw(new Error(label+': your phone could not decode this image. The original is over 10 MB; export a smaller standard JPG (10 MB or smaller) and select it.'));return;}
-          try{
-            var reader=new FileReader();
-            reader.onload=function(){
-              var result=String(reader.result||''),mime='';
-              var comma=result.indexOf(','),header=comma>0?result.slice(0,comma):'',payload=comma>0?result.slice(comma+1):'';
-              if(['data:image/jpeg;base64','data:image/png;base64','data:image/webp;base64'].indexOf(header)<0||!/^[A-Za-z0-9+/]+={0,2}$/.test(payload)){rejectRaw(new Error(label+': this file is not a supported JPG, PNG or WebP image.'));return;}
-              if(file.slice && file.slice(0,32).arrayBuffer){
-                file.slice(0,32).arrayBuffer().then(function(buffer){
-                  var bytes=new Uint8Array(buffer),ascii='';
-                  for(var i=0;i<bytes.length;i++)ascii+=String.fromCharCode(bytes[i]);
-                  if(bytes[0]===0xff&&bytes[1]===0xd8)mime='image/jpeg';
-                  else if(bytes[0]===0x89&&ascii.slice(1,4)==='PNG')mime='image/png';
-                  else if(ascii.slice(0,4)==='RIFF'&&ascii.slice(8,12)==='WEBP')mime='image/webp';
-                  if(!mime){rejectRaw(new Error(label+': file contents are not a valid JPG, PNG or WebP.'));return;}
-                  resolveRaw('data:'+mime+';base64,'+payload);
-                }).catch(function(){rejectRaw(new Error(label+': could not read the selected image file.'));});
-              }else rejectRaw(new Error(label+': your browser could not inspect the selected image.'));
-            };
-            reader.onerror=function(){rejectRaw(new Error(label+': your browser could not read the selected image file.'));};
-            reader.readAsDataURL(file);
-          }catch(e){rejectRaw(new Error(label+': your browser could not read the selected image file.'));}
+          var fileInfo=' [file: '+(file.name||'unnamed')+', type: '+(file.type||'unknown')+', size: '+Math.round((file.size||0)/1024)+' KB]';
+          if(!file){rejectRaw(new Error(label+': no file was selected.'));return;}
+          if(file.size>10485760){rejectRaw(new Error(label+': selected file is larger than 10 MB.'+fileInfo));return;}
+          if(typeof file.arrayBuffer!=='function'){rejectRaw(new Error(label+': this browser does not support raw file reading. Try Chrome or choose a standard JPG.'+fileInfo));return;}
+          file.arrayBuffer().then(function(buffer){
+            var bytes=new Uint8Array(buffer),mime='';
+            if(bytes.length<12){rejectRaw(new Error(label+': selected file is empty or incomplete.'+fileInfo));return;}
+            if(bytes[0]===0xff&&bytes[1]===0xd8&&bytes[2]===0xff)mime='image/jpeg';
+            else if(bytes[0]===0x89&&bytes[1]===0x50&&bytes[2]===0x4e&&bytes[3]===0x47&&bytes[4]===0x0d&&bytes[5]===0x0a&&bytes[6]===0x1a&&bytes[7]===0x0a)mime='image/png';
+            else if(bytes[0]===0x52&&bytes[1]===0x49&&bytes[2]===0x46&&bytes[3]===0x46&&bytes[8]===0x57&&bytes[9]===0x45&&bytes[10]===0x42&&bytes[11]===0x50)mime='image/webp';
+            else if(bytes[4]===0x66&&bytes[5]===0x74&&bytes[6]===0x79&&bytes[7]===0x70){
+              var brand=String.fromCharCode(bytes[8],bytes[9],bytes[10],bytes[11]);
+              if(/hei[cfx]|mif1|msf1/i.test(brand)){rejectRaw(new Error(label+': this file is HEIC/HEIF, not a standard JPG. Export it from Gallery as JPG and select the exported copy.'+fileInfo));return;}
+            }
+            if(!mime){rejectRaw(new Error(label+': the selected file contents are not a supported JPG, PNG or WebP image. Please export a standard JPG from Gallery.'+fileInfo));return;}
+            var binary='',chunk=0x8000;
+            for(var i=0;i<bytes.length;i+=chunk){
+              binary+=String.fromCharCode.apply(null,bytes.subarray(i,Math.min(i+chunk,bytes.length)));
+            }
+            resolveRaw('data:'+mime+';base64,'+btoa(binary));
+          }).catch(function(err){
+            rejectRaw(new Error(label+': the browser could not access the selected file bytes ('+(err&&err.message?err.message:'read failed')+'). Try selecting the file from Gallery or Downloads, or use Chrome.'+fileInfo));
+          });
         });
       }
       function fail(){
