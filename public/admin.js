@@ -35,12 +35,12 @@ async function renderPage(){
 
 async function adminNotifications(){
  const d=await api('GET','/api/admin/notifications');S.adminNotifications=d.notifications||[];
- const count=d.unread||0,el=$('#adminNotificationCount');if(el)el.textContent=count?String(count):'';
+ const count=Number(d.unread)||0,el=$('#adminNotificationCount');if(el){el.textContent=count?String(count):'';el.hidden=count===0;}
  const rows=S.adminNotifications.map(n=>'<div class="tr notification-item '+(n.is_read?'read':'unread')+'"><div class="m"><b>'+esc(n.title)+'</b><small>'+esc(n.message)+' · '+esc(date(n.created_at))+'</small></div><div class="r">'+(n.is_read?'<span class="read-state">READ</span>':'<button class="btn" type="button" data-act="admin-notification-read" data-id="'+n.id+'">Mark as read</button>')+'</div></div>').join('');
  root.innerHTML=head('Notifications',count+' unread','<button class="btn" data-act="admin-notification-read-all">Mark all read</button>')+'<div class="panel">'+(rows||noRows('No administrator notifications yet.'))+'</div>';
 }
 async function refreshAdminNotificationCount(){
- try{const d=await api('GET','/api/admin/notifications');const el=$('#adminNotificationCount');if(el)el.textContent=d.unread?String(d.unread):'';if(S.page==='notifications')await adminNotifications();}catch(_){}
+ try{const d=await api('GET','/api/admin/notifications');const count=Number(d.unread)||0;const el=$('#adminNotificationCount');if(el){el.textContent=count?String(count):'';el.hidden=count===0;}if(S.page==='notifications')await adminNotifications();}catch(_){}
 }
 
 async function cryptoDeposits(){
