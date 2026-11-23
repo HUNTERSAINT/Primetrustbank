@@ -665,6 +665,26 @@
         else if(!e.status)friendly='We could not connect to Prime Trust. Check your internet connection and try again. If money appears held or deducted, do not submit again—contact support with your reference.';
       }
       setErr(form, friendly);
+      if(kind==='external-transfer'&&e.status===400){
+        var msg=String(e.message||''),fieldName='';
+        if(/^SWIFT\\/BIC field:/i.test(msg))fieldName='swift_bic';
+        else if(/^IBAN field:/i.test(msg))fieldName='iban';
+        else if(/^IBAN \\/ Account number field:/i.test(msg))fieldName='iban';
+        else if(/^Account number field:/i.test(msg))fieldName='account_number';
+        else if(/bank address/i.test(msg))fieldName='bank_address';
+        else if(/bank country/i.test(msg))fieldName='bank_country';
+        else if(/bank city/i.test(msg))fieldName='bank_city';
+        else if(/beneficiary street/i.test(msg))fieldName='intl_recipient_street';
+        else if(/beneficiary city/i.test(msg))fieldName='intl_recipient_city';
+        else if(/beneficiary country/i.test(msg))fieldName='intl_recipient_country';
+        else if(/destination currency/i.test(msg))fieldName='destination_currency';
+        else if(/transfer purpose/i.test(msg))fieldName='transfer_purpose';
+        else if(/relationship/i.test(msg))fieldName='recipient_relationship';
+        else if(/source of funds/i.test(msg))fieldName='source_of_funds';
+        else if(/fee preference/i.test(msg))fieldName='charge_bearer';
+        var bad=fieldName&&form.querySelector('[name="'+fieldName+'"]');
+        if(bad){var wrap=bad.closest('.field');bad.style.outline='2px solid #ff647c';bad.style.outlineOffset='2px';if(wrap){wrap.style.background='rgba(255,80,110,.10)';wrap.style.borderRadius='12px';wrap.style.padding='8px';}bad.focus({preventScroll:true});bad.scrollIntoView({behavior:'smooth',block:'center'});}
+      }
       if (kind === 'login' && e.status === 403 && /verify your email/i.test(e.message)) { S.pendingEmail=d.email;S.view='email-verify';render();return; }
       if (e.status === 401 && S.me) { S.me = null; go('login'); }
     });
