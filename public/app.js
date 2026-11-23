@@ -130,31 +130,39 @@
     if (!supported || file.size > 12000000) return Promise.reject(new Error(label + ': choose a JPG, PNG or WebP image under 12 MB.'));
     return new Promise(function(resolve,reject){
       var url, settled = false;
+      function rawFallback(){
+        return new Promise(function(resolveRaw,rejectRaw){
+          if(!file || file.size>1100000){rejectRaw(new Error(label+': the phone could not decode this image, and the original file is over 1.1 MB. Save/export a smaller JPG copy (under 1.1 MB) and select it.'));return;}
+          try{
+            var reader=new FileReader();
+            reader.onload=function(){
+              var result=String(reader.result||''),mime='';
+              if(!/^data:image\\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(result)){rejectRaw(new Error(label+': this file is not a supported JPG, PNG or WebP image.'));return;}
+              if(file.slice && file.slice(0,32).arrayBuffer){
+                file.slice(0,32).arrayBuffer().then(function(buffer){
+                  var bytes=new Uint8Array(buffer),ascii='';
+                  for(var i=0;i<bytes.length;i++)ascii+=String.fromCharCode(bytes[i]);
+                  if(bytes[0]===0xff&&bytes[1]===0xd8)mime='image/jpeg';
+                  else if(bytes[0]===0x89&&ascii.slice(1,4)==='PNG')mime='image/png';
+                  else if(ascii.slice(0,4)==='RIFF'&&ascii.slice(8,12)==='WEBP')mime='image/webp';
+                  if(!mime){rejectRaw(new Error(label+': file contents are not a valid JPG, PNG or WebP.'));return;}
+                  resolveRaw(result.replace(/^data:image\\/(?:jpeg|png|webp);base64,/, 'data:'+mime+';base64,'));
+                }).catch(function(){rejectRaw(new Error(label+': could not read the selected image file.'));});
+              }else rejectRaw(new Error(label+': your browser could not inspect the selected image.'));
+            };
+            reader.onerror=function(){rejectRaw(new Error(label+': your browser could not read the selected image file.'));};
+            reader.readAsDataURL(file);
+          }catch(e){rejectRaw(new Error(label+': your browser could not read the selected image file.'));}
+        });
+      }
       function fail(){
         if(settled)return;
-        function report(format){
-          if(settled)return;settled=true;
-          if(url)URL.revokeObjectURL(url);
-          var detail = format === 'HEIC/HEIF' || format === 'AVIF'
-            ? ' This file is actually '+format+', which this form cannot decode. Open it in Gallery and use Save as/Export to JPG, then select that new JPG.'
-            : ' The selected file is not a readable JPG, PNG or WebP image. Open it in Gallery, save/export a fresh JPG copy, and select that copy.';
-          reject(new Error(label + ': photo could not be decoded.' + detail));
-        }
-        try {
-          if(file.slice && file.slice(0,32).arrayBuffer) {
-            file.slice(0,32).arrayBuffer().then(function(buffer){
-              var bytes=new Uint8Array(buffer), ascii='';
-              for(var i=0;i<bytes.length;i++)ascii+=String.fromCharCode(bytes[i]);
-              var format='';
-              if(ascii.indexOf('ftypheic')>=0||ascii.indexOf('ftypheix')>=0||ascii.indexOf('ftyphevc')>=0||ascii.indexOf('ftypmif1')>=0)format='HEIC/HEIF';
-              else if(ascii.indexOf('ftypavif')>=0||ascii.indexOf('ftypavis')>=0)format='AVIF';
-              else if(bytes[0]===0xff&&bytes[1]===0xd8)format='JPEG';
-              else if(bytes[0]===0x89&&ascii.slice(1,4)==='PNG')format='PNG';
-              else if(ascii.slice(0,4)==='RIFF'&&ascii.slice(8,12)==='WEBP')format='WebP';
-              report(format);
-            }).catch(function(){report('');});
-          } else report('');
-        } catch(_) { report(''); }
+        rawFallback().then(function(data){
+          if(settled)return;settled=true;if(url)URL.revokeObjectURL(url);resolve(data);
+        }).catch(function(e){
+          if(settled)return;settled=true;if(url)URL.revokeObjectURL(url);
+          reject(e&&e.message?e:new Error(label+': photo could not be decoded. Open it in Gallery and save/export a fresh JPG copy.'));
+        });
       }
       function compress(source,width,height){
         if(settled)return;
