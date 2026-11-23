@@ -445,6 +445,17 @@ app.delete('/api/admin/crypto-deposit/settings/:id',adminAuth,wrap(async(req,res
  const result=await db.run('DELETE FROM crypto_deposit_wallets WHERE id=?',[id]);if(!result.changes)throw httpErr(404,'Crypto wallet option not found.');
  await auditAdmin(req,'CRYPTO_DEPOSIT_WALLET_DELETED',null,null,'Wallet option #'+id+' removed');res.json({ok:true});
 }));
+app.get('/api/admin/crypto-deposit/requests/:id/proof',adminAuth,wrap(async(req,res)=>{
+ const id=Number(req.params.id);
+ if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid deposit request.');
+ const row=await db.get('SELECT screenshot_data FROM crypto_deposit_requests WHERE id=?',[id]);
+ if(!row)throw httpErr(404,'Deposit request not found.');
+ if(!row.screenshot_data)throw httpErr(404,'No transaction screenshot was uploaded for this request.');
+ const match=/^data:image\\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(row.screenshot_data);
+ if(!match)throw httpErr(500,'Stored transaction screenshot is invalid.');
+ res.set('Cache-Control','no-store, private');
+ res.type('jpeg').send(Buffer.from(match[1],'base64'));
+}));
 app.get('/api/admin/crypto-deposit/requests',adminAuth,wrap(async(req,res)=>{
  const status=String(req.query.status||'pending');
  if(!['pending','verified','rejected','all'].includes(status))throw httpErr(400,'Invalid deposit request status.');
@@ -923,10 +934,15 @@ app.post('/api/crypto-deposit/requests',auth,requireVerified,moneyLimiter,wrap(a
  if(!/^(?:0|[1-9]\d{0,17})(?:\.\d{1,18})?$/.test(amount)||Number(amount)<=0)throw httpErr(400,'Enter a valid crypto amount.');
  if(hash.length<16||hash.length>200||!/^[A-Za-z0-9:_-]+$/.test(hash))throw httpErr(400,'Enter a valid transaction hash.');
  if(!Number.isSafeInteger(walletId)||walletId<1)throw httpErr(400,'Choose a crypto deposit option.');
+ const screenshot=String(b.screenshot_data||'').trim();
+ const match=/^data:image\\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(screenshot);
+ if(!match)throw httpErr(400,'Upload a valid transaction screenshot.');
+ const imageBytes=Buffer.from(match[1],'base64');
+ if(!imageBytes.length||imageBytes.length>1100000)throw httpErr(400,'Transaction screenshot is too large after compression. Choose a smaller image.');
  const w=await db.get('SELECT id,asset,network FROM crypto_deposit_wallets WHERE id=? AND enabled=1',[walletId]);
  if(!w)throw httpErr(503,'That crypto deposit option is not currently enabled.');
  try{
-  const result=await db.run("INSERT INTO crypto_deposit_requests (user_id,wallet_id,asset,network,amount_crypto,transaction_hash,status,created_at) VALUES (?,?,?,?,?,?, 'pending',?)",[req.user.id,w.id,w.asset,w.network,amount,hash,now()]);
+  const result=await db.run("INSERT INTO crypto_deposit_requests (user_id,wallet_id,asset,network,amount_crypto,transaction_hash,screenshot_data,status,created_at) VALUES (?,?,?,?,?,?,?, 'pending',?)",[req.user.id,w.id,w.asset,w.network,amount,hash,screenshot,now()]);
   res.status(201).json({ok:true,request_id:result.lastInsertRowid,status:'pending',credited:false});
  }catch(e){if(String(e.message||'').toLowerCase().includes('unique'))throw httpErr(409,'This transaction hash has already been submitted.');throw e;}
 }));
