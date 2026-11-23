@@ -1087,7 +1087,17 @@ app.post('/api/external-transfers', auth, requireVerified, moneyLimiter, wrap(as
     if(!['ach','wire','international'].includes(method)||bank.length<2||name.length<2)throw httpErr(400,'Enter a valid transfer method, bank and beneficiary full legal name.');
     if(method==='international'){
       if(!/^[A-Z0-9]{8}([A-Z0-9]{3})?$/.test(swift)||!(/^[A-Z0-9]{4,34}$/.test(iban)||/^[A-Z0-9]{4,34}$/.test(acctIntl)))throw httpErr(400,'Enter a valid SWIFT/BIC and either an IBAN or international account number.');
-      if(bankAddress.length<5||bankCountry.length<2||bankCity.length<2||street.length<3||city.length<2||country.length<2||currency.length!==3||!/^[A-Z]{3}$/.test(currency)||purpose.length<3||relationship.length<2||sourceOfFunds.length<2||!['OUR','SHA','BEN'].includes(chargeBearer))throw httpErr(400,'Complete beneficiary and bank addresses, bank city/country, destination country/currency, purpose, relationship, source of funds and fee preference.');
+      if(bankAddress.length<5)throw httpErr(400,'Please enter the bank address (at least 5 characters).');
+      if(bankCountry.length<2)throw httpErr(400,'Please select or enter the bank country.');
+      if(bankCity.length<2)throw httpErr(400,'Please enter the bank city.');
+      if(street.length<3)throw httpErr(400,'Please enter the beneficiary street address (at least 3 characters).');
+      if(city.length<2)throw httpErr(400,'Please enter the beneficiary city.');
+      if(country.length<2)throw httpErr(400,'Please select the beneficiary country.');
+      if(currency.length!==3||!/^[A-Z]{3}$/.test(currency))throw httpErr(400,'Please select a valid 3-letter destination currency, such as EUR or GBP.');
+      if(purpose.length<3)throw httpErr(400,'Please enter the transfer purpose (at least 3 characters).');
+      if(relationship.length<2)throw httpErr(400,'Please select your relationship to the beneficiary.');
+      if(sourceOfFunds.length<2)throw httpErr(400,'Please select the source of funds.');
+      if(!['OUR','SHA','BEN'].includes(chargeBearer))throw httpErr(400,'Please choose who pays the transfer fees.');
       if(beneficiaryEmail&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(beneficiaryEmail))throw httpErr(400,'Enter a valid beneficiary email address or leave it blank.');
       if(intermediarySwift&&!/^[A-Z0-9]{8}([A-Z0-9]{3})?$/.test(intermediarySwift))throw httpErr(400,'Enter a valid intermediary SWIFT/BIC or leave it blank.');
       if(intermediaryBank.length>0&&intermediarySwift.length===0)throw httpErr(400,'Enter the intermediary bank SWIFT/BIC when providing an intermediary bank.');
