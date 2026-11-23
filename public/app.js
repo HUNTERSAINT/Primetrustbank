@@ -89,7 +89,7 @@
   }
   function readKycImages(form) {
     var f = form.elements;
-    return Promise.all([compressIdFile(f.id_front.files[0]), compressIdFile(f.id_back.files[0]), compressIdFile(f.selfie.files[0]), compressIdFile(f.proof_address.files[0])]);
+    return Promise.all([compressIdFile(f.id_front.files[0],'Front of ID'), compressIdFile(f.id_back.files[0],'Back of ID'), compressIdFile(f.selfie.files[0],'Selfie photo'), compressIdFile(f.proof_address.files[0],'Proof of address')]);
   }
   function vAuth(mode) {
     var reg = mode === 'register';
@@ -121,19 +121,40 @@
       '<button type="button" class="muted" style="padding:8px" data-act="go" data-v="login">Back to login</button>' +
       '</form></div></section>';
   }
-  function compressIdFile(file) {
+  function compressIdFile(file, label) {
+    label = label || 'Selected image';
     if (!file) return Promise.resolve('');
     var type = String(file.type || '').toLowerCase();
     var name = String(file.name || '').toLowerCase();
     var supported = /^image\/(jpeg|png|webp)$/.test(type) || /\.(jpe?g|png|webp)$/.test(name);
-    if (!supported || file.size > 12000000) return Promise.reject(new Error('Choose a JPG, PNG or WebP image under 12 MB.'));
+    if (!supported || file.size > 12000000) return Promise.reject(new Error(label + ': choose a JPG, PNG or WebP image under 12 MB.'));
     return new Promise(function(resolve,reject){
-      var url;
-      var settled = false;
+      var url, settled = false;
       function fail(){
-        if(settled)return;settled=true;
-        if(url)URL.revokeObjectURL(url);
-        reject(new Error('This photo could not be decoded on your phone. Open it in Gallery, save/export it as a JPG, then select the saved copy.'));
+        if(settled)return;
+        function report(format){
+          if(settled)return;settled=true;
+          if(url)URL.revokeObjectURL(url);
+          var detail = format === 'HEIC/HEIF' || format === 'AVIF'
+            ? ' This file is actually '+format+', which this form cannot decode. Open it in Gallery and use Save as/Export to JPG, then select that new JPG.'
+            : ' The selected file is not a readable JPG, PNG or WebP image. Open it in Gallery, save/export a fresh JPG copy, and select that copy.';
+          reject(new Error(label + ': photo could not be decoded.' + detail));
+        }
+        try {
+          if(file.slice && file.slice(0,32).arrayBuffer) {
+            file.slice(0,32).arrayBuffer().then(function(buffer){
+              var bytes=new Uint8Array(buffer), ascii='';
+              for(var i=0;i<bytes.length;i++)ascii+=String.fromCharCode(bytes[i]);
+              var format='';
+              if(ascii.indexOf('ftypheic')>=0||ascii.indexOf('ftypheix')>=0||ascii.indexOf('ftyphevc')>=0||ascii.indexOf('ftypmif1')>=0)format='HEIC/HEIF';
+              else if(ascii.indexOf('ftypavif')>=0||ascii.indexOf('ftypavis')>=0)format='AVIF';
+              else if(bytes[0]===0xff&&bytes[1]===0xd8)format='JPEG';
+              else if(bytes[0]===0x89&&ascii.slice(1,4)==='PNG')format='PNG';
+              else if(ascii.slice(0,4)==='RIFF'&&ascii.slice(8,12)==='WEBP')format='WebP';
+              report(format);
+            }).catch(function(){report('');});
+          } else report('');
+        } catch(_) { report(''); }
       }
       function compress(source,width,height){
         if(settled)return;
@@ -146,18 +167,17 @@
           ctx.drawImage(source,0,0,canvas.width,canvas.height);
           var data=canvas.toDataURL('image/jpeg',0.72);
           if(url)URL.revokeObjectURL(url);
-          if(data.length>1450000)throw new Error('Image is too large after compression. Choose a smaller photo.');
+          if(data.length>1450000)throw new Error(label + ': image is too large after compression. Choose a smaller photo.');
           settled=true;resolve(data);
         }catch(e){
           if(url)URL.revokeObjectURL(url);
-          if(settled)return;settled=true;reject(e&&e.message?e:new Error('Image compression failed.'));
+          if(settled)return;settled=true;reject(e&&e.message?new Error(label+': '+e.message):new Error(label+': image compression failed.'));
         }
       }
       function bitmapFallback(){
         if(typeof createImageBitmap==='function'){
           createImageBitmap(file).then(function(bitmap){
-            compress(bitmap,bitmap.width,bitmap.height);
-            if(bitmap.close)bitmap.close();
+            try{compress(bitmap,bitmap.width,bitmap.height);}finally{if(bitmap.close)bitmap.close();}
           }).catch(fail);
         }else fail();
       }
@@ -640,10 +660,10 @@
       });
     }
     else if (kind === 'upgrade') {
-      p=compressIdFile(form.elements.proof_address.files[0]).then(function(img){return api('POST','/api/verification/upgrade',{proof_address:img});});
+      p=compressIdFile(form.elements.proof_address.files[0],'Proof of address').then(function(img){return api('POST','/api/verification/upgrade',{proof_address:img});});
     }
     else if (kind === 'support') p = api('POST', '/api/support/messages', {message:d.message});
-    else if (kind === 'crypto-deposit-request') p=compressIdFile(form.elements.transaction_screenshot.files[0]).then(function(proof){return api('POST','/api/crypto-deposit/requests',{wallet_id:d.wallet_id,amount_crypto:d.amount_crypto,transaction_hash:d.transaction_hash,screenshot_data:proof},S.idem);});
+    else if (kind === 'crypto-deposit-request') p=compressIdFile(form.elements.transaction_screenshot.files[0],'Transaction screenshot').then(function(proof){return api('POST','/api/crypto-deposit/requests',{wallet_id:d.wallet_id,amount_crypto:d.amount_crypto,transaction_hash:d.transaction_hash,screenshot_data:proof},S.idem);});
 
     else if (kind === 'schedule') {
       var localDate=new Date(parseEasternDateTimeLocal(d.scheduled_at));
