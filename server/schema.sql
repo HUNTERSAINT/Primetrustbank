@@ -364,3 +364,19 @@ CREATE TABLE IF NOT EXISTS crypto_deposit_requests (
 CREATE INDEX IF NOT EXISTS idx_crypto_deposit_user ON crypto_deposit_requests(user_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_crypto_deposit_status ON crypto_deposit_requests(status, created_at DESC);
 ALTER TABLE crypto_deposit_requests ENABLE ROW LEVEL SECURITY;
+
+
+-- Multiple administrator-managed crypto deposit options (asset + network + wallet).
+CREATE TABLE IF NOT EXISTS crypto_deposit_wallets (
+ id BIGSERIAL PRIMARY KEY,
+ enabled INTEGER NOT NULL DEFAULT 1,
+ asset TEXT NOT NULL,
+ network TEXT NOT NULL,
+ wallet_address TEXT NOT NULL,
+ instructions TEXT NOT NULL DEFAULT '',
+ created_at BIGINT NOT NULL DEFAULT 0,
+ updated_at BIGINT NOT NULL DEFAULT 0,
+ updated_by TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_crypto_wallets_enabled ON crypto_deposit_wallets(enabled,id);
+ALTER TABLE crypto_deposit_requests ADD COLUMN IF NOT EXISTS wallet_id BIGINT;
