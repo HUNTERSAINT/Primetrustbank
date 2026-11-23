@@ -59,7 +59,7 @@ function client() {
   const a = client(), b = client(), admin = client();
   let r;
 
-  const registrationKycA = { legal_name: 'Ada Okafor', date_of_birth: '1995-05-12', address: '12 Example Street, Lagos, Nigeria', id_type: 'Passport', id_country: 'Kenya', id_number: 'A1234567', id_expiry: '2035-01-01', id_front: 'data:image/jpeg;base64,AA==', id_back: '', selfie: 'data:image/jpeg;base64,AA==' };
+  const registrationKycA = { legal_name: 'Ada Okafor', date_of_birth: '1995-05-12', address: '12 Example Street, New York, NY 10001, United States', id_type: 'Passport', id_country: 'United States', id_number: 'A1234567', id_expiry: '2035-01-01', id_front: 'data:image/jpeg;base64,AA==', id_back: '', selfie: 'data:image/jpeg;base64,AA==' };
   const registrationKycB = { ...registrationKycA, legal_name: 'Tolu Bello' };
   r = await a('POST', '/api/auth/register', { email: 'ada@example.com', full_name: 'Ada Okafor', password: 'longpassword1', pin: '1234' });
   assert.equal(r.status, 201, 'register a and send email verification');
