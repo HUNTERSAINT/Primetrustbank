@@ -50,8 +50,8 @@ async function notifyAdminAction(action,details){
  const recipient=String(process.env.ADMIN_EMAIL||'teringelff@gmail.com').trim().toLowerCase();
  const subject='Prime Trust admin action required: '+String(action||'Review request').slice(0,120);
  const detailText=String(details||'A customer action requires administrator review.').slice(0,2500);
- const textBody=subject+'\\n\\n'+detailText+'\\n\\nPlease sign in to the Prime Trust administrator portal to review this request.';
- const htmlBody='<div style="font-family:Arial,sans-serif;line-height:1.6;color:#17212b"><h2>'+emailHtmlEscape(subject)+'</h2><p>'+emailHtmlEscape(detailText).replace(/\\n/g,'<br>')+'</p><p>Please sign in to the Prime Trust administrator portal to review this request.</p></div>';
+ const textBody=subject+'\n\n'+detailText+'\n\nPlease sign in to the Prime Trust administrator portal to review this request.';
+ const htmlBody='<div style="font-family:Arial,sans-serif;line-height:1.6;color:#17212b"><h2>'+emailHtmlEscape(subject)+'</h2><p>'+emailHtmlEscape(detailText).replace(/\n/g,'<br>')+'</p><p>Please sign in to the Prime Trust administrator portal to review this request.</p></div>';
  try{await sendTransactionalEmail(recipient,subject,textBody,htmlBody);}
  catch(error){console.error('Admin action email notification failed:',error&&error.message?error.message:'unknown email error');}
 }
@@ -1321,7 +1321,7 @@ app.post('/api/disputes',auth,requireVerified,sensitiveWriteLimiter,wrap(async (
   res.status(201).json({ok:true});
 }));
 
-kyc.mount(app, { db, auth, adminAuth, wrap, httpErr, sealKyc, unsealKyc, auditAdmin, notifyUser, limiter: sensitiveWriteLimiter, now });
+kyc.mount(app, { db, auth, adminAuth, wrap, httpErr, sealKyc, unsealKyc, auditAdmin, notifyUser, notifyAdminAction, limiter: sensitiveWriteLimiter, now });
 
 app.use('/api', (req, res) => fail(res, 404, 'Not found.'));
 app.use((err, req, res, next) => {
