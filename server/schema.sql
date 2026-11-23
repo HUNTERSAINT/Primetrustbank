@@ -168,11 +168,18 @@ CREATE INDEX IF NOT EXISTS idx_admin_sessions_expiry ON admin_sessions(expires_a
 
 CREATE TABLE IF NOT EXISTS support_sessions (
   id         BIGSERIAL PRIMARY KEY,
-  user_id    BIGINT NOT NULL UNIQUE REFERENCES users(id),
+  user_id    BIGINT UNIQUE REFERENCES users(id),
+  contact_email TEXT,
+  contact_name TEXT,
   status     TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
   created_at BIGINT NOT NULL,
   updated_at BIGINT NOT NULL
 );
+-- Safe migrations for existing authenticated support conversations and new email-originated guests.
+ALTER TABLE support_sessions ALTER COLUMN user_id DROP NOT NULL;
+ALTER TABLE support_sessions ADD COLUMN IF NOT EXISTS contact_email TEXT;
+ALTER TABLE support_sessions ADD COLUMN IF NOT EXISTS contact_name TEXT;
+CREATE INDEX IF NOT EXISTS idx_support_sessions_contact_email ON support_sessions(contact_email, status, updated_at DESC);
 CREATE TABLE IF NOT EXISTS support_messages (
   id          BIGSERIAL PRIMARY KEY,
   session_id  BIGINT NOT NULL REFERENCES support_sessions(id),
@@ -180,8 +187,15 @@ CREATE TABLE IF NOT EXISTS support_messages (
   sender_name TEXT NOT NULL,
   message     TEXT NOT NULL,
   is_read     INTEGER NOT NULL DEFAULT 0,
+  provider_message_id TEXT,
+  resend_email_id TEXT,
+  email_status TEXT,
   created_at  BIGINT NOT NULL
 );
+ALTER TABLE support_messages ADD COLUMN IF NOT EXISTS provider_message_id TEXT;
+ALTER TABLE support_messages ADD COLUMN IF NOT EXISTS resend_email_id TEXT;
+ALTER TABLE support_messages ADD COLUMN IF NOT EXISTS email_status TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_support_messages_provider_id ON support_messages(provider_message_id) WHERE provider_message_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_support_messages_session ON support_messages(session_id, id);
 
 CREATE TABLE IF NOT EXISTS mfa_challenges (
