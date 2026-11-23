@@ -838,6 +838,17 @@
     else if (kind === 'external-transfer') { S.idem=uuid(); p = api('POST','/api/external-transfers',{transfer_type:d.transfer_type,bank_name:d.bank_name,routing_number:d.routing_number,account_name:d.account_name,account_number:d.account_number,account_type:d.account_type,recipient_street:d.recipient_street,recipient_city:d.recipient_city,recipient_state:d.recipient_state,recipient_postal_code:d.recipient_postal_code,recipient_country:d.recipient_country,recipient_phone:d.recipient_phone,bank_address:d.bank_address,amount:d.amount,pin:d.pin,note:d.note,swift_bic:d.swift_bic,iban:d.iban,intl_recipient_street:d.intl_recipient_street,intl_recipient_city:d.intl_recipient_city,intl_recipient_state:d.intl_recipient_state,intl_recipient_postal_code:d.intl_recipient_postal_code,intl_recipient_country:d.intl_recipient_country==='Other'?d.intl_recipient_country_other:d.intl_recipient_country,bank_country:d.bank_country,destination_currency:d.destination_currency,transfer_purpose:d.transfer_purpose,recipient_relationship:d.recipient_relationship,source_of_funds:d.source_of_funds,intermediary_bank:d.intermediary_bank,intermediary_swift:d.intermediary_swift,intermediary_account:d.intermediary_account,local_bank_code:d.local_bank_code,bank_city:d.bank_city,bank_branch:d.bank_branch,charge_bearer:d.charge_bearer,beneficiary_email:d.beneficiary_email},S.idem); }
     else if (kind === 'bills') p = api('POST', '/api/bills', { biller: d.biller, reference: d.reference, amount: d.amount, pin: d.pin }, S.idem);
     else return;
+    if (kind === 'mfa-login') {
+      p.then(function () {
+        mfaChallengeId = '';
+        form.innerHTML = '<h2>Code accepted</h2><p class="lead">Your sign-in is verified. Opening your dashboard…</p><a class="pillbtn w" href="/?signedin=' + Date.now() + '">Open dashboard</a>';
+        window.location.assign('/?signedin=' + Date.now());
+      }).catch(function (e) {
+        busy(form, false);
+        setErr(form, e.message || 'We could not verify that code. Request a new code and try again.');
+      });
+      return;
+    }
     p.then(function (res) {
       if (kind === 'forgot') { busy(form,false); form.innerHTML='<h2>Check your email</h2><p class="lead">If an account exists for that email, password recovery instructions have been sent. Check your inbox and spam folder.</p><button type="button" class="pillbtn w" data-act="go" data-v="login">Back to login</button>'; return; }
       if (kind === 'reset') { resetToken=''; try { window.history.replaceState({},document.title,window.location.pathname+window.location.hash); } catch (_) {} S.view='login'; render(); toast('Password updated. Please sign in with your new password.'); return; }
