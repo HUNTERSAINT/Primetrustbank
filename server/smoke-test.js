@@ -174,13 +174,13 @@ function client() {
   assert.equal((await a('GET', '/api/me')).body.account.balance, 0, 'legacy deposit endpoint cannot credit test funds');
   r = await admin('PATCH', '/api/admin/deposit-settings', {bank_name:'Smoke Test Bank',account_name:'Prime Trust Test',account_number:'1234567890',account_type:'Current',currency:'USD',instructions:'Smoke test receiving account'});
   assert.equal(r.status, 200, 'admin can configure receiving bank details');
-  r = await a('POST', '/api/deposit/requests', {method:'bank',amount:500,reference:'SMOKE-DEP-REF-0001'});
+  r = await a('POST', '/api/deposit/requests', {method:'bank',amount:2000,reference:'SMOKE-DEP-REF-0001'});
   assert.equal(r.status, 201, 'customer can submit manual bank deposit request');
   assert.equal(r.body.status, 'pending', 'deposit starts pending');
   assert.equal((await a('GET', '/api/me')).body.account.balance, 0, 'deposit request does not credit before review');
   r = await admin('POST', '/api/admin/deposit-requests/'+r.body.id+'/review', {status:'confirmed',review_note:'Verified smoke-test funds received'});
   assert.equal(r.status, 200, 'admin can confirm a verified deposit');
-  assert.equal((await a('GET', '/api/me')).body.account.balance, 50000, 'confirmed deposit credits account exactly once');
+  assert.equal((await a('GET', '/api/me')).body.account.balance, 200000, 'confirmed deposit credits account exactly once');
 
   r = await a('POST', '/api/transfers', { to_account: meB.account.number, amount: 200, pin: '0000' });
   assert.equal(r.status, 403, 'wrong PIN rejected');
