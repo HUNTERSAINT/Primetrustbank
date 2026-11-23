@@ -205,6 +205,9 @@ root.addEventListener('input',e=>{
 root.addEventListener('submit',async e=>{
  const form=e.target.closest('form[data-form]');if(!form)return;e.preventDefault();const data=Object.fromEntries(new FormData(form));const type=form.dataset.form;
  try{
+  if(type==='deposit-bank'){await api('PATCH','/api/admin/deposit-settings',data);notify('Bank deposit details saved.');await depositSettings();return;}
+  if(type==='crypto-wallet'){await api('POST','/api/admin/crypto-wallets',data);notify('Crypto wallet added.');await depositSettings();return;}
+
   if(type==='physical-card-fee'){await api('PATCH','/api/admin/card-settings',{physical_card_fee_cents:Math.round(Number(data.fee)*100)});notify('Physical card fee saved.');await cardRequests();return;}
   if(type==='adjust'){const id=form.dataset.id;if(!confirm('Post this ledger adjustment?'))return;await api('POST','/api/admin/users/'+id+'/adjust-balance',data);notify('Adjustment posted to the ledger.');S.userId=Number(id);await userDetail();return;}
   if(type==='tx-filter'){S.txQuery=data.q||'';S.txType=data.type||'all';S.txFrom=data.from||'';S.txTo=data.to||'';await transactions();return;}
