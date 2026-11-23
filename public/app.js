@@ -137,8 +137,24 @@
           var fileInfo=' [file: '+(file.name||'unnamed')+', type: '+(file.type||'unknown')+', size: '+Math.round((file.size||0)/1024)+' KB]';
           if(!file){rejectRaw(new Error(label+': no file was selected.'));return;}
           if(file.size>10485760){rejectRaw(new Error(label+': selected file is larger than 10 MB.'+fileInfo));return;}
-          if(typeof file.arrayBuffer!=='function'){rejectRaw(new Error(label+': this browser does not support raw file reading. Try Chrome or choose a standard JPG.'+fileInfo));return;}
-          file.arrayBuffer().then(function(buffer){
+          function readBytes(){
+            return new Promise(function(resolveBytes,rejectBytes){
+              function fromArrayBuffer(){
+                if(typeof file.arrayBuffer!=='function'){rejectBytes(new Error('This browser cannot read the selected file.'));return;}
+                try{file.arrayBuffer().then(resolveBytes,rejectBytes).catch(rejectBytes);}catch(e){rejectBytes(e);}
+              }
+              if(typeof FileReader==='function'){
+                try{
+                  var reader=new FileReader();
+                  reader.onload=function(){resolveBytes(reader.result);};
+                  reader.onerror=function(){fromArrayBuffer();};
+                  reader.onabort=function(){fromArrayBuffer();};
+                  reader.readAsArrayBuffer(file);
+                }catch(e){fromArrayBuffer();}
+              }else fromArrayBuffer();
+            });
+          }
+          readBytes().then(function(buffer){
             var bytes=new Uint8Array(buffer),mime='';
             if(bytes.length<12){rejectRaw(new Error(label+': selected file is empty or incomplete.'+fileInfo));return;}
             if(bytes[0]===0xff&&bytes[1]===0xd8&&bytes[2]===0xff)mime='image/jpeg';
