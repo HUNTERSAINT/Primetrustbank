@@ -38,9 +38,9 @@ if (!KYC_ENCRYPTION_KEY) {
   process.exit(1);
 }
 async function sendTransactionalEmail(to,subject,textBody,htmlBody){
-  const apiKey=process.env.RESEND_API_KEY,from=process.env.RESEND_FROM_EMAIL||process.env.EMAIL_FROM;
+  const apiKey=process.env.RESEND_API_KEY,from=process.env.RESEND_FROM_EMAIL||process.env.EMAIL_FROM,replyTo=process.env.RESEND_REPLY_TO||'reply@primetrustdigital.org';
   if(!apiKey||!from)throw httpErr(503,'Secure email delivery is not configured.');
-  const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({from,to:[to],subject,text:textBody,html:htmlBody})});
+  const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({from,reply_to:[replyTo],to:[to],subject,text:textBody,html:htmlBody})});
   if(!response.ok)throw httpErr(502,'Could not send the security email. Try again later.');
 }
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 10);
@@ -544,7 +544,7 @@ app.post('/api/admin/email/send', adminAuth, wrap(async (req,res)=>{
   const b=req.body||{}, audience=String(b.audience||'all'), ids=Array.isArray(b.userIds)?b.userIds.map(Number):[], subject=String(b.subject||'').trim(), message=String(b.message||'').trim();
   if(!['all','active','selected'].includes(audience)||subject.length<2||subject.length>180||message.length<1||message.length>10000) throw httpErr(400,'Choose an audience and provide a subject and message.');
   if(audience==='selected'&&!ids.length) throw httpErr(400,'Select at least one customer.');
-  const apiKey=process.env.RESEND_API_KEY, from=process.env.RESEND_FROM_EMAIL||process.env.EMAIL_FROM;
+  const apiKey=process.env.RESEND_API_KEY, from=process.env.RESEND_FROM_EMAIL||process.env.EMAIL_FROM, replyTo=process.env.RESEND_REPLY_TO||'reply@primetrustdigital.org';
   if(!apiKey||!from) throw httpErr(503,'Email sending is not configured. Set RESEND_API_KEY and RESEND_FROM_EMAIL.');
   let users=(await db.all('SELECT id,full_name,email,status FROM users ORDER BY id', []));
   if(audience==='active') users=users.filter(u=>u.status==='active');
@@ -557,7 +557,7 @@ app.post('/api/admin/email/send', adminAuth, wrap(async (req,res)=>{
   const results=[]; let sent=0,failed=0;
   for(const user of users){
     try{
-      const response=fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({from,to:[user.email],subject,text:'Hello '+user.full_name+',\n\n'+message+'\n\nPrime Trust Bank',html:'<!doctype html><html><body style=\"font-family:Arial,sans-serif;color:#20162f\"><h2>Prime Trust Bank</h2><p>Hello '+escapeHtml(user.full_name)+',</p><div style=\"line-height:1.7\">'+safeMessage+'</div><p>Regards,<br>Prime Trust Bank Support</p></body></html>'})});
+      const response=fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({from,reply_to:[replyTo],to:[user.email],subject,text:'Hello '+user.full_name+',\n\n'+message+'\n\nPrime Trust Bank',html:'<!doctype html><html><body style=\"font-family:Arial,sans-serif;color:#20162f\"><h2>Prime Trust Bank</h2><p>Hello '+escapeHtml(user.full_name)+',</p><div style=\"line-height:1.7\">'+safeMessage+'</div><p>Regards,<br>Prime Trust Bank Support</p></body></html>'})});
       results.push({user,response});
     }catch(_){failed++;results.push({user,error:'Network error'});}
   }
@@ -648,7 +648,7 @@ app.post('/api/auth/login', authLimiter, wrap(async (req, res) => {
 app.post('/api/auth/password-reset/request',authLimiter,wrap(async (req,res)=>{
   const email=String((req.body||{}).email||'').trim().toLowerCase();
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>120)throw httpErr(400,'Enter a valid email address.');
-  const apiKey=process.env.RESEND_API_KEY,from=process.env.RESEND_FROM_EMAIL||process.env.EMAIL_FROM;
+  const apiKey=process.env.RESEND_API_KEY,from=process.env.RESEND_FROM_EMAIL||process.env.EMAIL_FROM,replyTo=process.env.RESEND_REPLY_TO||'reply@primetrustdigital.org';
   if(!apiKey||!from)throw httpErr(503,'Password recovery email is not configured.');
   const user=(await db.get('SELECT id,full_name,email FROM users WHERE email=?', [email]));
   if(user){
@@ -658,7 +658,7 @@ app.post('/api/auth/password-reset/request',authLimiter,wrap(async (req,res)=>{
     const base=String(process.env.PUBLIC_APP_URL||req.protocol+'://'+req.get('host')).replace(/\/$/,'');
     const link=base+'/?reset='+encodeURIComponent(raw);
     const safeName=String(user.full_name).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-    const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({from,to:[user.email],subject:'Reset your Prime Trust password',text:'Hello '+user.full_name+',\n\nUse this link to reset your password within 30 minutes: '+link+'\n\nIf you did not request this, ignore this email.',html:'<p>Hello '+safeName+',</p><p>Use this link to reset your Prime Trust password. It expires in 30 minutes.</p><p><a href="'+link+'">Reset password</a></p><p>If you did not request this, ignore this email.</p>'})});
+    const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({from,reply_to:[replyTo],to:[user.email],subject:'Reset your Prime Trust password',text:'Hello '+user.full_name+',\n\nUse this link to reset your password within 30 minutes: '+link+'\n\nIf you did not request this, ignore this email.',html:'<p>Hello '+safeName+',</p><p>Use this link to reset your Prime Trust password. It expires in 30 minutes.</p><p><a href="'+link+'">Reset password</a></p><p>If you did not request this, ignore this email.</p>'})});
     if(!response.ok){(await db.run('UPDATE password_reset_tokens SET used_at=? WHERE token_hash=?', [now(),hash]));throw httpErr(502,'Could not send password recovery email. Try again later.');}
   }
   res.json({ok:true,message:'If the account exists, password recovery instructions have been sent.'});
