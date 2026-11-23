@@ -14,7 +14,7 @@ const PROD = process.env.NODE_ENV === 'production';
 const PORT = process.env.PORT || 3000;
 const ADMIN_PORTAL_PATH = String(process.env.ADMIN_PORTAL_PATH || '').trim();
 const ADMIN_PORTAL_PATH_VALID = /^\/[a-z0-9-]{24,80}$/i.test(ADMIN_PORTAL_PATH) && !ADMIN_PORTAL_PATH.includes('..');
-const SANDBOX_FUNDING = process.env.NODE_ENV === 'test'; // Test-only funding; never enabled in production.
+const SANDBOX_FUNDING = process.env.NODE_ENV === 'test'; // Test-only funding; disabled in production.
 const SESSION_HOURS = 8;
 const ADMIN_SESSION_HOURS = 4;
 
