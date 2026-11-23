@@ -14,7 +14,7 @@ const PROD = process.env.NODE_ENV === 'production';
 const PORT = process.env.PORT || 3000;
 const ADMIN_PORTAL_PATH = String(process.env.ADMIN_PORTAL_PATH || '').trim();
 const ADMIN_PORTAL_PATH_VALID = /^\/[a-z0-9-]{24,80}$/i.test(ADMIN_PORTAL_PATH) && !ADMIN_PORTAL_PATH.includes('..');
-const SANDBOX_FUNDING = false; // Test-fund credits are disabled; deposits use the manual review ledger.
+const SANDBOX_FUNDING = process.env.NODE_ENV === 'test'; // Test-only funding; never enabled in production.
 const SESSION_HOURS = 8;
 const ADMIN_SESSION_HOURS = 4;
 
@@ -54,7 +54,7 @@ app.use(helmet({
       'style-src': ["'self'", 'https://fonts.googleapis.com', "'unsafe-inline'"],
       'font-src': ["'self'", 'https://fonts.gstatic.com'],
       'script-src': ["'self'"],
-      'img-src': ["'self'", 'data:', 'https:'],
+      'img-src': ["'self'", 'data:'],
       'upgrade-insecure-requests': PROD ? [] : null
     }
   }
@@ -407,71 +407,6 @@ app.get('/api/admin/overview', adminAuth, wrap(async (req, res) => {
   const recentTx = (await db.all("SELECT t.id,t.type,t.amount,t.balance_after,t.counterparty,t.note,t.created_at,u.full_name,u.email,a.account_number FROM transactions t JOIN accounts a ON a.id=t.account_id JOIN users u ON u.id=a.user_id WHERE a.kind='user' ORDER BY t.id DESC LIMIT 8", []));
   const openChats = (await db.get("SELECT COUNT(*) n FROM support_sessions WHERE status='open'", [])).n;
   res.json({stats:{totalUsers:users.total||0,activeUsers:users.active||0,suspendedUsers:users.suspended||0,pendingKyc:kyc,totalTransactions:tx,totalUserBalances:balances,todayTransactions:todayTx,openChats},recentUsers,recentTransactions:recentTx});
-}));
-app.get('/api/admin/deposit-settings',adminAuth,wrap(async(req,res)=>{
- const bank=await db.get('SELECT bank_name,account_name,account_number,account_type,currency,instructions FROM deposit_settings WHERE id=1');
- const wallets=await db.all('SELECT id,name,asset,network,address,qr_url,instructions,active,created_at FROM crypto_wallets ORDER BY id DESC',[]);
- res.json({bank:bank||{bank_name:'',account_name:'',account_number:'',account_type:'',currency:'USD',instructions:''},wallets});
-}));
-app.patch('/api/admin/deposit-settings',adminAuth,wrap(async(req,res)=>{
- const b=req.body||{};
- const fields=['bank_name','account_name','account_number','account_type','currency','instructions'];
- const values=fields.map(k=>String(b[k]||'').trim());
- values[0]=values[0].slice(0,120);values[1]=values[1].slice(0,120);values[2]=values[2].slice(0,80);values[3]=values[3].slice(0,40);values[4]=(values[4]||'USD').toUpperCase().slice(0,8);values[5]=values[5].slice(0,1000);
- if(!values[0]||!values[1]||values[2].length<4||!values[4])throw httpErr(400,'Enter the bank name, account name, account number and currency.');
- await db.run('INSERT INTO deposit_settings (id,bank_name,account_name,account_number,account_type,currency,instructions,updated_at,updated_by) VALUES (1,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET bank_name=excluded.bank_name,account_name=excluded.account_name,account_number=excluded.account_number,account_type=excluded.account_type,currency=excluded.currency,instructions=excluded.instructions,updated_at=excluded.updated_at,updated_by=excluded.updated_by',[...values,now(),String(req.admin.email||'admin')]);
- await auditAdmin(req,'DEPOSIT_BANK_DETAILS_UPDATED',null,null,'Admin-managed bank deposit details updated');
- res.json({ok:true});
-}));
-app.post('/api/admin/crypto-wallets',adminAuth,wrap(async(req,res)=>{
- const b=req.body||{},name=String(b.name||'').trim().slice(0,80),asset=String(b.asset||'').trim().toUpperCase().slice(0,20),network=String(b.network||'').trim().slice(0,80),address=String(b.address||'').trim().slice(0,300),qr_url=String(b.qr_url||'').trim().slice(0,500),instructions=String(b.instructions||'').trim().slice(0,1000);
- if(!name||!asset||!network||address.length<8)throw httpErr(400,'Enter wallet label, asset, network and receiving address.');
- if(qr_url&&qr_url.indexOf('https://')!==0)throw httpErr(400,'QR image URL must use HTTPS.');
- const result=await db.get('INSERT INTO crypto_wallets (name,asset,network,address,qr_url,instructions,active,created_at,updated_at) VALUES (?,?,?,?,?,?,1,?,?) RETURNING id',[name,asset,network,address,qr_url||null,instructions,now(),now()]);
- await auditAdmin(req,'CRYPTO_WALLET_CREATED',null,null,asset+' '+network+' wallet added');res.status(201).json({ok:true,id:result.lastInsertRowid||result.id});
-}));
-app.patch('/api/admin/crypto-wallets/:id',adminAuth,wrap(async(req,res)=>{
- const id=Number(req.params.id),active=(req.body||{}).active===true;if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid wallet.');
- const wallet=await db.get('SELECT id,name,asset,network FROM crypto_wallets WHERE id=?',[id]);if(!wallet)throw httpErr(404,'Wallet not found.');
- await db.run('UPDATE crypto_wallets SET active=?,updated_at=? WHERE id=?',[active?1:0,now(),id]);await auditAdmin(req,active?'CRYPTO_WALLET_ENABLED':'CRYPTO_WALLET_DISABLED',null,null,wallet.asset+' '+wallet.network+' wallet');res.json({ok:true,active});
-}));
-app.delete('/api/admin/crypto-wallets/:id',adminAuth,wrap(async(req,res)=>{
- const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid wallet.');
- const wallet=await db.get('SELECT id,name,asset,network FROM crypto_wallets WHERE id=?',[id]);if(!wallet)throw httpErr(404,'Wallet not found.');
- await db.run('UPDATE crypto_wallets SET active=0,updated_at=? WHERE id=?',[now(),id]);await auditAdmin(req,'CRYPTO_WALLET_DISABLED',null,null,wallet.asset+' '+wallet.network+' wallet disabled');res.json({ok:true});
-}));
-app.get('/api/admin/deposit-requests',adminAuth,wrap(async(req,res)=>{
- const status=String(req.query.status||'pending');
- if(!['pending','all','confirmed','rejected'].includes(status))throw httpErr(400,'Invalid deposit request status.');
- const where=status==='all'?'':"WHERE dr.status=?";
- const args=status==='all'?[]:[status];
- const requests=await db.all("SELECT dr.id,dr.user_id,dr.method,dr.amount,dr.currency,dr.depositor_name,dr.reference,dr.wallet_name,dr.wallet_network,dr.wallet_address,dr.status,dr.review_note,dr.created_at,dr.reviewed_at,u.full_name,u.email,a.account_number FROM deposit_requests dr JOIN users u ON u.id=dr.user_id JOIN accounts a ON a.id=dr.account_id "+where+" ORDER BY CASE dr.status WHEN 'pending' THEN 0 ELSE 1 END,dr.created_at DESC LIMIT 300",args);
- res.json({requests,pending:(await db.get("SELECT COUNT(*) n FROM deposit_requests WHERE status='pending'",[])).n});
-}));
-app.post('/api/admin/deposit-requests/:id/review',adminAuth,wrap(async(req,res)=>{
- const id=Number(req.params.id),b=req.body||{},decision=String(b.status||''),note=String(b.review_note||'').trim().slice(0,300);
- if(!Number.isSafeInteger(id)||id<1||!['confirmed','rejected'].includes(decision))throw httpErr(400,'Choose confirm or reject.');
- if(decision==='rejected'&&note.length<3)throw httpErr(400,'Enter a reason for rejecting this deposit.');
- if(decision==='confirmed'&&note.length<4)throw httpErr(400,'Add a note confirming the transfer was independently verified.');
- const result=await db.tx(async()=>{
-  const request=await db.get('SELECT * FROM deposit_requests WHERE id=? FOR UPDATE',[id]);
-  if(!request)throw httpErr(404,'Deposit request not found.');
-  if(request.status!=='pending')throw httpErr(409,'This deposit request has already been reviewed.');
-  if(decision==='rejected'){
-   await db.run('UPDATE deposit_requests SET status=?,review_note=?,reviewed_by=?,reviewed_at=?,updated_at=? WHERE id=?',[decision,note,String(req.admin.email||'admin'),now(),now(),id]);
-   await auditAdmin(req,'DEPOSIT_REQUEST_REJECTED',request.user_id,request.amount,'Deposit request #'+id+': '+note);
-   return {status:decision};
-  }
-  const account=await db.get('SELECT * FROM accounts WHERE id=? FOR UPDATE',[request.account_id]);
-  const sys=await db.get("SELECT * FROM accounts WHERE account_number='SYS-ADMIN-ADJUST' AND kind='system'",[]);
-  if(!account||!sys)throw httpErr(500,'Deposit ledger accounts are unavailable.');
-  await move({from:sys,to:account,amount:request.amount,typeOut:'manual_deposit_out',typeIn:'deposit',counterOut:'Deposit clearing',counterIn:request.method==='bank'?'Bank deposit':'Crypto deposit',note:'Deposit request #'+id+' · '+request.reference});
-  const ledger=await db.get('SELECT id FROM transactions WHERE account_id=? ORDER BY id DESC LIMIT 1',[account.id]);
-  await db.run('UPDATE deposit_requests SET status=?,review_note=?,reviewed_by=?,reviewed_at=?,updated_at=?,ledger_tx_id=? WHERE id=?',[decision,note,String(req.admin.email||'admin'),now(),now(),ledger?ledger.id:null,id]);
-  await auditAdmin(req,'DEPOSIT_REQUEST_CONFIRMED',request.user_id,request.amount,'Deposit request #'+id+' manually verified and credited');
-  return {status:decision,balance:(await db.get('SELECT balance FROM accounts WHERE id=?',[account.id])).balance};
- });
- res.json({ok:true,...result});
 }));
 app.get('/api/admin/card-settings',adminAuth,wrap(async(req,res)=>{
  const s=await db.get('SELECT physical_card_fee_cents FROM card_product_settings WHERE id=1');
@@ -1046,10 +981,28 @@ app.post('/api/bills', auth, requireVerified, moneyLimiter, wrap(async (req, res
   });
 }));
 
-app.post('/api/deposit',auth,requireVerified,moneyLimiter,wrap(async(req,res)=>{throw httpErr(410,'Test-fund deposits are disabled. Submit a bank or crypto deposit request instead.');}));
-app.get('/api/deposit/options',auth,wrap(async(req,res)=>{const bank=await db.get('SELECT bank_name,account_name,account_number,account_type,currency,instructions FROM deposit_settings WHERE id=1');const wallets=await db.all("SELECT id,name,asset,network,address,qr_url,instructions FROM crypto_wallets WHERE active=1 ORDER BY id",[]);res.json({bank:bank||null,wallets});}));
-app.get('/api/deposit/requests',auth,wrap(async(req,res)=>{const requests=await db.all("SELECT id,method,amount,currency,depositor_name,reference,wallet_name,wallet_network,status,review_note,created_at,reviewed_at FROM deposit_requests WHERE user_id=? ORDER BY id DESC LIMIT 50",[req.user.id]);res.json({requests});}));
-app.post('/api/deposit/requests',auth,requireVerified,moneyLimiter,wrap(async(req,res)=>{const b=req.body||{},method=String(b.method||''),amount=cents(b.amount),reference=String(b.reference||'').trim();if(!['bank','crypto'].includes(method)||!amount||amount>100000000)throw httpErr(400,'Choose a deposit method and enter a valid amount.');if(reference.length<4||reference.length>200)throw httpErr(400,'Enter a valid transfer reference or transaction hash.');let wallet=null,bank=null;if(method==='bank'){bank=await db.get('SELECT bank_name,account_name,account_number,account_type,currency,instructions FROM deposit_settings WHERE id=1');if(!bank||!bank.bank_name||!bank.account_name||!bank.account_number)throw httpErr(503,'Bank deposit details have not been configured by the administrator.');}else{const walletId=Number(b.wallet_id);if(!Number.isSafeInteger(walletId)||walletId<1)throw httpErr(400,'Choose a configured crypto wallet.');wallet=await db.get('SELECT id,name,asset,network,address,qr_url,instructions FROM crypto_wallets WHERE id=? AND active=1',[walletId]);if(!wallet)throw httpErr(400,'That crypto wallet is unavailable.');if(reference.length<20)throw httpErr(400,'The crypto transaction hash looks too short.');}const duplicate=await db.get('SELECT id FROM deposit_requests WHERE lower(reference)=lower(?)',[reference]);if(duplicate)throw httpErr(409,'This transfer reference or transaction hash has already been submitted.');const t=now();const result=await db.get("INSERT INTO deposit_requests (user_id,account_id,method,amount,currency,depositor_name,reference,wallet_id,wallet_name,wallet_network,wallet_address,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?,?) RETURNING id",[req.user.id,req.account.id,method,amount,req.account.currency,req.user.full_name,reference,wallet?wallet.id:null,wallet?wallet.name:null,wallet?wallet.network:null,wallet?wallet.address:null,t,t]);res.status(201).json({ok:true,id:result.lastInsertRowid||result.id||null,status:'pending'});}));
+// Sandbox only: credits play money from a system account. Turn off with ALLOW_SANDBOX_FUNDING=false.
+app.post('/api/deposit', auth, requireVerified, moneyLimiter, wrap(async (req, res) => {
+  if (!SANDBOX_FUNDING) throw httpErr(403, 'Funding is disabled.');
+  await idempotent(req, res, async () => {
+    const amt = cents((req.body || {}).amount);
+    if (!amt || amt > 1000 * 100) throw httpErr(400, 'Sandbox deposits are limited to 1,000 at a time.');
+    const sys = (await db.get("SELECT * FROM accounts WHERE account_number = 'SYS-SANDBOX'", []));
+    const out = (await db.tx(async () => {
+      const gid = crypto.randomUUID(), t = now();
+      (await db.run('UPDATE accounts SET balance = balance + ? WHERE id = ?', [-amt, sys.id])); (await db.run('UPDATE accounts SET balance = balance + ? WHERE id = ?', [amt, req.account.id]));
+      const a = (await db.get('SELECT * FROM accounts WHERE id = ?', [req.account.id]));
+      (await db.run(`INSERT INTO transactions
+  (group_id, account_id, type, amount, balance_after, counterparty, note, created_at)
+  VALUES (?,?,?,?,?,?,?,?)`, [gid, a.id, 'deposit', amt, a.balance, 'Deposit', 'sandbox', t]));
+      (await db.run(`INSERT INTO transactions
+  (group_id, account_id, type, amount, balance_after, counterparty, note, created_at)
+  VALUES (?,?,?,?,?,?,?,?)`, [gid, sys.id, 'deposit_out', -amt, (await db.get('SELECT * FROM accounts WHERE id = ?', [sys.id])).balance, req.user.full_name, 'sandbox', t]));
+      return a.balance;
+    }));
+    return { ok: true, balance: out };
+  });
+}));
 
 app.post('/api/card/request',auth,requireVerified,sensitiveWriteLimiter,wrap(async (req,res)=>{
  if((await db.get('SELECT 1 FROM cards WHERE account_id=?', [req.account.id])))throw httpErr(409,'A card has already been issued.');
