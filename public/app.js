@@ -126,13 +126,13 @@
     if (!file) return Promise.resolve('');
     var type = String(file.type || '').toLowerCase();
     var name = String(file.name || '').toLowerCase();
-    var supported = /^image\/(jpeg|png|webp)$/.test(type) || /\.(jpe?g|png|webp)$/.test(name);
+    var heic = /heic|heif/.test(type) || /\.(heic|heif)$/.test(name);\n    if(heic) return Promise.reject(new Error(label+': this photo is HEIC/HEIF, which this upload form cannot decode. Open it in Gallery and export it as a standard JPG.'));\n    var supported = /^image\/(jpeg|png|webp)$/.test(type) || /\.(jpe?g|png|webp)$/.test(name);
     if (!supported || file.size > 12000000) return Promise.reject(new Error(label + ': choose a JPG, PNG or WebP image under 12 MB.'));
     return new Promise(function(resolve,reject){
       var url, settled = false;
       function rawFallback(){
         return new Promise(function(resolveRaw,rejectRaw){
-          if(!file || file.size>1100000){rejectRaw(new Error(label+': the phone could not decode this image, and the original file is over 1.1 MB. Save/export a smaller JPG copy (under 1.1 MB) and select it.'));return;}
+          if(!file || file.size>3200000){rejectRaw(new Error(label+': your phone could not decode this image. The original is over 3.2 MB; export a smaller standard JPG (under 3.2 MB) and select it.'));return;}
           try{
             var reader=new FileReader();
             reader.onload=function(){
