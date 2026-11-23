@@ -299,7 +299,7 @@
     function field(label,name,placeholder,help,attrs){return '<label class="field">'+label+'<input name="'+name+'" placeholder="'+placeholder+'" '+(attrs||'')+'></label><small class="hint">'+help+'</small>';}
     return '<section class="screen">'+pageHead('International transfer','Complete each section using the recipient bank’s official instructions')+
       '<div class="panel section"><p class="lead">Have the beneficiary’s bank instructions available before starting. Use the exact legal name and account details. Do not guess bank codes.</p><div class="hint"><b>Important:</b> This form submits a transfer request for review. It does not send an instant bank payment. Amount, exchange rate, fees and processing time must be confirmed before processing.</div></div>'+
-      '<form class="form panel section" data-form="external-transfer">'+
+      '<form class="form panel section" data-form="external-transfer"><input type="hidden" name="transfer_type" value="international">'+
       '<h3>1. Beneficiary</h3>'+
       field('Beneficiary full legal name','account_name','e.g. Jane Mary Doe','Enter the name exactly as it appears on the recipient’s bank account.','required minlength="2" maxlength="100" autocomplete="name"')+
       field('Beneficiary street address','intl_recipient_street','e.g. 14 King Street, Flat 2','Enter the recipient’s residential or business street address.','required minlength="3" maxlength="120"')+
