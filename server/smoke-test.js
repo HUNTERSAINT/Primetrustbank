@@ -5,6 +5,21 @@ process.env.NODE_ENV = 'test';
 process.env.ALLOW_SANDBOX_FUNDING = 'true'; // isolated test database only
 process.env.ADMIN_EMAIL = 'admin@primetrust.test';
 process.env.ADMIN_PASSWORD = 'test-admin-password';
+process.env.RESEND_API_KEY = 'test-resend-key';
+process.env.RESEND_FROM_EMAIL = 'Prime Trust <mail@primetrustdigital.org>';
+process.env.RESEND_REPLY_TO = 'reply@primetrustdigital.org';
+const emailCodes = Object.create(null);
+const realFetch = global.fetch;
+global.fetch = async (url, options) => {
+  if (String(url).startsWith('https://api.resend.com/emails')) {
+    const payload = JSON.parse(options.body || '{}');
+    const text = String(payload.text || '');
+    const match = text.match(/(?:code is|code:)\s*(\d{6})/i);
+    if (match && Array.isArray(payload.to) && payload.to[0]) emailCodes[String(payload.to[0]).toLowerCase()] = match[1];
+    return new Response(JSON.stringify({ id: 'test-email-id' }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
+  return realFetch(url, options);
+};
 const assert = require('assert');
 const app = require('./index');
 
@@ -37,12 +52,18 @@ function client() {
 
   const registrationKycA = { legal_name: 'Ada Okafor', date_of_birth: '1995-05-12', address: '12 Example Street, Lagos, Nigeria', id_type: 'Passport', id_country: 'Kenya', id_number: 'A1234567', id_expiry: '2035-01-01', id_front: 'data:image/jpeg;base64,AA==', id_back: '', selfie: 'data:image/jpeg;base64,AA==' };
   const registrationKycB = { ...registrationKycA, legal_name: 'Tolu Bello' };
-  r = await a('POST', '/api/auth/register', { email: 'ada@example.com', full_name: 'Ada Okafor', password: 'longpassword1', pin: '1234', ...registrationKycA });
-  assert.equal(r.status, 201, 'register a with KYC');
-  r = await b('POST', '/api/auth/register', { email: 'tolu@example.com', full_name: 'Tolu Bello', password: 'longpassword2', pin: '4321', ...registrationKycB });
-  assert.equal(r.status, 201, 'register b with KYC');
-  // Input rules
-  const bad = async (patch, why) => { const x = await client()('POST', '/api/auth/register', { email: 'x' + Math.random().toString(36).slice(2) + '@example.com', full_name: 'Test Person', password: 'longpassword3', pin: '1234', ...registrationKycA, ...patch }); assert.equal(x.status, 400, why + ' -> ' + JSON.stringify(x.body)); };
+  r = await a('POST', '/api/auth/register', { email: 'ada@example.com', full_name: 'Ada Okafor', password: 'longpassword1', pin: '1234' });
+  assert.equal(r.status, 201, 'register a and send email verification');
+  r = await b('POST', '/api/auth/register', { email: 'tolu@example.com', full_name: 'Tolu Bello', password: 'longpassword2', pin: '4321' });
+  assert.equal(r.status, 201, 'register b and send email verification');
+  r = await a('POST', '/api/verification/submit', registrationKycA);
+  assert.equal(r.status, 401, 'KYC cannot be submitted before email verification');
+  r = await a('POST', '/api/auth/email-verification/confirm', { email:'ada@example.com', code:emailCodes['ada@example.com'] });
+  assert.equal(r.status, 200, 'verify a email before KYC');
+  r = await b('POST', '/api/auth/email-verification/confirm', { email:'tolu@example.com', code:emailCodes['tolu@example.com'] });
+  assert.equal(r.status, 200, 'verify b email before KYC');
+  // KYC input rules are checked only after email verification.
+  const bad = async (patch, why) => { const x = await a('POST', '/api/verification/submit', { ...registrationKycA, ...patch }); assert.equal(x.status, 400, why + ' -> ' + JSON.stringify(x.body)); };
   await bad({ date_of_birth: new Date(Date.now() - 17 * 365.25 * 864e5).toISOString().slice(0, 10) }, 'under 18 rejected');
   await bad({ id_expiry: '2020-01-01' }, 'expired ID rejected');
   await bad({ id_number: '' }, 'ID number required');
