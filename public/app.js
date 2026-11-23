@@ -121,7 +121,30 @@
       '<button type="button" class="muted" style="padding:8px" data-act="go" data-v="login">Back to login</button>' +
       '</form></div></section>';
   }
+  // Photos are read the moment they are chosen, because phones can revoke access to a picked file before the form is submitted.
+  var earlyReads = new WeakMap();
+  var FILE_LABELS = { id_front: 'Front of ID', id_back: 'Back of ID', selfie: 'Selfie photo', proof_address: 'Proof of address', transaction_screenshot: 'Transaction screenshot' };
+  function fileNote(input, text, bad) {
+    var n = input.parentNode.querySelector('.file-note');
+    if (!n) { n = document.createElement('small'); n.className = 'file-note'; n.setAttribute('role', 'status'); n.style.display = 'block'; n.style.marginTop = '6px'; input.parentNode.appendChild(n); }
+    n.textContent = text || ''; n.style.color = bad ? '#ff8a8a' : '#7fe3a4';
+  }
+  document.addEventListener('change', function (e) {
+    var input = e.target;
+    if (!input || input.type !== 'file') return;
+    fileNote(input, '');
+    var f = input.files && input.files[0];
+    if (!f) return;
+    fileNote(input, 'Preparing photo...');
+    var p = compressIdFileNow(f, FILE_LABELS[input.name] || 'Selected image');
+    earlyReads.set(f, p);
+    p.then(function () { fileNote(input, 'Photo ready'); }, function (err) { fileNote(input, err.message + ' If it keeps failing, pick the photo from Gallery or Downloads, or take a new one.', true); });
+  });
   function compressIdFile(file, label) {
+    if (file && earlyReads.has(file)) return earlyReads.get(file);
+    return compressIdFileNow(file, label);
+  }
+  function compressIdFileNow(file, label) {
     label = label || 'Selected image';
     if (!file) return Promise.resolve('');
     var type = String(file.type || '').toLowerCase();
