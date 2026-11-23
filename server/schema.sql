@@ -380,3 +380,8 @@ CREATE TABLE IF NOT EXISTS crypto_deposit_wallets (
 );
 CREATE INDEX IF NOT EXISTS idx_crypto_wallets_enabled ON crypto_deposit_wallets(enabled,id);
 ALTER TABLE crypto_deposit_requests ADD COLUMN IF NOT EXISTS wallet_id BIGINT;
+
+INSERT INTO crypto_deposit_wallets (enabled,asset,network,wallet_address,instructions,created_at,updated_at,updated_by)
+SELECT enabled,asset,network,wallet_address,instructions,updated_at,updated_at,updated_by
+FROM crypto_deposit_settings WHERE id=1 AND enabled=1 AND length(wallet_address)>=8
+AND NOT EXISTS (SELECT 1 FROM crypto_deposit_wallets);
