@@ -4,7 +4,7 @@ const $=s=>document.querySelector(s), root=$('#content');
 const S={page:'overview',userId:null,kycStatus:'pending',txType:'all',txQuery:'',txFrom:'',txTo:'',chatId:null,chatFilter:'open',chatSearch:'',chatMobileDetail:false,chatSearchTimer:null,users:[],recipients:[],selected:[],emailAudience:'active'};
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function money(v){return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format((Number(v)||0)/100);}
-function date(v){if(!v)return '—';return new Date(Number(v)).toLocaleString();}
+function date(v){if(!v)return '—';return new Date(Number(v)).toLocaleString('en-US',{timeZone:'America/New_York',dateStyle:'medium',timeStyle:'short',timeZoneName:'short'});}
 function badge(v){return '<span class="badge '+esc(String(v||'').toLowerCase())+'">'+esc(v||'unknown')+'</span>';}
 function api(method,url,body){return fetch(url,{method,credentials:'same-origin',headers:{'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)}).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.error||'Request failed');return d;});}
 function notify(text,bad){let old=$('.notice');if(old)old.remove();const n=document.createElement('div');n.className=bad?'alert':'notice';n.textContent=text;root.prepend(n);setTimeout(()=>n.remove(),7000);}
