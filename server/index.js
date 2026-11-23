@@ -423,6 +423,23 @@ app.patch('/api/admin/deposit-settings',adminAuth,wrap(async(req,res)=>{
  await auditAdmin(req,'DEPOSIT_BANK_DETAILS_UPDATED',null,null,'Admin-managed bank deposit details updated');
  res.json({ok:true});
 }));
+app.post('/api/admin/crypto-wallets',adminAuth,wrap(async(req,res)=>{
+ const b=req.body||{},name=String(b.name||'').trim().slice(0,80),asset=String(b.asset||'').trim().toUpperCase().slice(0,20),network=String(b.network||'').trim().slice(0,80),address=String(b.address||'').trim().slice(0,300),qr_url=String(b.qr_url||'').trim().slice(0,500),instructions=String(b.instructions||'').trim().slice(0,1000);
+ if(!name||!asset||!network||address.length<8)throw httpErr(400,'Enter wallet label, asset, network and receiving address.');
+ if(qr_url&&qr_url.indexOf('https://')!==0)throw httpErr(400,'QR image URL must use HTTPS.');
+ const result=await db.run('INSERT INTO crypto_wallets (name,asset,network,address,qr_url,instructions,active,created_at,updated_at) VALUES (?,?,?,?,?,?,1,?,?) RETURNING id',[name,asset,network,address,qr_url||null,instructions,now(),now()]);
+ await auditAdmin(req,'CRYPTO_WALLET_CREATED',null,null,asset+' '+network+' wallet added');res.status(201).json({ok:true,id:result.lastInsertRowid||result.id});
+}));
+app.patch('/api/admin/crypto-wallets/:id',adminAuth,wrap(async(req,res)=>{
+ const id=Number(req.params.id),active=(req.body||{}).active===true;if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid wallet.');
+ const wallet=await db.get('SELECT id,name,asset,network FROM crypto_wallets WHERE id=?',[id]);if(!wallet)throw httpErr(404,'Wallet not found.');
+ await db.run('UPDATE crypto_wallets SET active=?,updated_at=? WHERE id=?',[active?1:0,now(),id]);await auditAdmin(req,active?'CRYPTO_WALLET_ENABLED':'CRYPTO_WALLET_DISABLED',null,null,wallet.asset+' '+wallet.network+' wallet');res.json({ok:true,active});
+}));
+app.delete('/api/admin/crypto-wallets/:id',adminAuth,wrap(async(req,res)=>{
+ const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid wallet.');
+ const wallet=await db.get('SELECT id,name,asset,network FROM crypto_wallets WHERE id=?',[id]);if(!wallet)throw httpErr(404,'Wallet not found.');
+ await db.run('UPDATE crypto_wallets SET active=0,updated_at=? WHERE id=?',[now(),id]);await auditAdmin(req,'CRYPTO_WALLET_DISABLED',null,null,wallet.asset+' '+wallet.network+' wallet disabled');res.json({ok:true});
+}));
 app.get('/api/admin/card-settings',adminAuth,wrap(async(req,res)=>{
  const s=await db.get('SELECT physical_card_fee_cents FROM card_product_settings WHERE id=1');
  res.json({physical_card_fee_cents:s?s.physical_card_fee_cents:2500});
