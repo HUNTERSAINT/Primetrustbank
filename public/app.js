@@ -659,7 +659,7 @@
       if(kind==='external-transfer'){
         if(e.status===401)friendly='Your session has expired. Please sign in again, then retry the transfer.';
         else if(e.status===403)friendly=/verify/i.test(friendly)?'Please complete email or identity verification before requesting an international transfer.':friendly;
-        else if(e.status===400)friendly='Please check the bank, beneficiary and transfer details. '+friendly;
+        else if(e.status===400)friendly=friendly;
         else if(e.status===422)friendly='This transfer cannot be submitted because of your account or transfer limits. '+friendly;
         else if(e.status===429)friendly='Too many transfer attempts. Please wait a few minutes and try again.';
         else if(!e.status)friendly='We could not connect to Prime Trust. Check your internet connection and try again. If money appears held or deducted, do not submit again—contact support with your reference.';
