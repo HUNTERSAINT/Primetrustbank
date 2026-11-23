@@ -598,24 +598,52 @@ app.post('/api/auth/register', authLimiter, wrap(async (req, res) => {
   if (name.length < 2 || name.length > 80) throw httpErr(400, 'Enter your full name.');
   if (typeof password !== 'string' || password.length < 12 || Buffer.byteLength(password, 'utf8') > 72) throw httpErr(400, 'Password must be at least 12 characters and no more than 72 UTF-8 bytes.');
   if (typeof pin !== 'string' || !/^\d{4}$/.test(pin)) throw httpErr(400, 'Transaction PIN must be 4 digits.');
-  const kycData = kyc.parseKyc(b, httpErr);
 
-  const ph = bcrypt.hashSync(password, 12), pinh = bcrypt.hashSync(pin, 12), submittedAt = now();
+  const ph = bcrypt.hashSync(password, 12), pinh = bcrypt.hashSync(pin, 12), created = now();
   let userId;
   try {
     userId = await db.tx(async () => {
-      const u = (await db.run("INSERT INTO users (email, full_name, password_hash, pin_hash, verification_status, verification_submitted_at, created_at) VALUES (?,?,?,?, 'submitted', ?, ?)", [em, name, ph, pinh, submittedAt, submittedAt])).lastInsertRowid;
+      const u = (await db.run("INSERT INTO users (email,email_verified_at,full_name,password_hash,pin_hash,verification_status,created_at) VALUES (?,NULL,?,?,?,'pending',?)", [em,name,ph,pinh,created])).lastInsertRowid;
       await db.run("INSERT INTO accounts (user_id, account_number, kind) VALUES (?,?, 'user')", [u, (await newAccountNumber())]);
-      // Card is issued only after customer request and administrator approval.
-      await kyc.saveRequest(db, sealKyc, u, kycData, submittedAt);
       return u;
     });
   } catch (e) {
     if (e && e.code === '23505') throw httpErr(409, 'An account with this email already exists.');
     throw e;
   }
-  await issueSession(res, Number(userId));
-  res.status(201).json({ ok: true, verification_status: 'submitted' });
+  const code=String(crypto.randomInt(0,1000000)).padStart(6,'0'),t=now(),hash=crypto.createHash('sha256').update('email-verify:'+em+':'+code+':'+JWT_SECRET).digest('hex');
+  await db.run('INSERT INTO email_verification_codes (user_id,code_hash,expires_at,created_at) VALUES (?,?,?,?)',[Number(userId),hash,t+10*60*1000,t]);
+  await sendTransactionalEmail(em,'Verify your Prime Trust email','Your Prime Trust email verification code is '+code+'. It expires in 10 minutes. Enter this code in the sign-up screen to continue to identity verification.','<p>Welcome to Prime Trust.</p><p>Your email verification code is:</p><h2 style="letter-spacing:6px">'+code+'</h2><p>This code expires in 10 minutes. After verifying your email, you can continue to identity verification.</p><p>If you did not create this account, you can ignore this email.</p>');
+  res.status(201).json({ok:true,email_verification_required:true,email:em});
+}));
+
+app.post('/api/auth/email-verification/resend',authLimiter,wrap(async(req,res)=>{
+  const email=String((req.body||{}).email||'').trim().toLowerCase();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>120)throw httpErr(400,'Enter a valid email address.');
+  const user=await db.get('SELECT id,email,email_verified_at FROM users WHERE email=?',[email]);
+  if(user&&!user.email_verified_at){
+    const code=String(crypto.randomInt(0,1000000)).padStart(6,'0'),t=now(),hash=crypto.createHash('sha256').update('email-verify:'+email+':'+code+':'+JWT_SECRET).digest('hex');
+    await db.run('UPDATE email_verification_codes SET used_at=? WHERE user_id=? AND used_at IS NULL',[t,user.id]);
+    await db.run('INSERT INTO email_verification_codes (user_id,code_hash,expires_at,created_at) VALUES (?,?,?,?)',[user.id,hash,t+10*60*1000,t]);
+    await sendTransactionalEmail(email,'Your Prime Trust email verification code','Your verification code is '+code+'. It expires in 10 minutes.','<p>Your Prime Trust email verification code is:</p><h2 style="letter-spacing:6px">'+code+'</h2><p>It expires in 10 minutes.</p>');
+  }
+  res.json({ok:true,message:'If the account needs verification, a new code has been sent.'});
+}));
+
+app.post('/api/auth/email-verification/confirm',authLimiter,wrap(async(req,res)=>{
+  const email=String((req.body||{}).email||'').trim().toLowerCase(),code=String((req.body||{}).code||'').trim();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||!/^\d{6}$/.test(code))throw httpErr(400,'Enter the email address and 6-digit verification code.');
+  const user=await db.get('SELECT id,email_verified_at,status FROM users WHERE email=?',[email]);
+  if(!user)throw httpErr(400,'The verification code is invalid or expired.');
+  if(user.email_verified_at){await issueSession(res,user.id,req);return res.json({ok:true,email_verified:true});}
+  const record=await db.get('SELECT * FROM email_verification_codes WHERE user_id=? AND used_at IS NULL ORDER BY id DESC LIMIT 1',[user.id]);
+  if(!record||record.expires_at<=now()||record.attempts>=5)throw httpErr(400,'The verification code is invalid or expired. Request a new code.');
+  const expected=crypto.createHash('sha256').update('email-verify:'+email+':'+code+':'+JWT_SECRET).digest('hex'),a=Buffer.from(expected),z=Buffer.from(record.code_hash);
+  if(a.length!==z.length||!crypto.timingSafeEqual(a,z)){await db.run('UPDATE email_verification_codes SET attempts=attempts+1 WHERE id=?',[record.id]);throw httpErr(400,'The verification code is incorrect. Check it and try again.');}
+  const t=now();
+  await db.tx(async()=>{await db.run('UPDATE email_verification_codes SET used_at=? WHERE id=?',[t,record.id]);await db.run('UPDATE users SET email_verified_at=? WHERE id=?',[t,user.id]);});
+  await issueSession(res,user.id,req);
+  res.json({ok:true,email_verified:true});
 }));
 
 app.post('/api/auth/login', authLimiter, wrap(async (req, res) => {
@@ -632,6 +660,7 @@ app.post('/api/auth/login', authLimiter, wrap(async (req, res) => {
     throw bad();
   }
   if (user.status === 'suspended') throw httpErr(403, 'This account is suspended. Please contact Prime Trust support.');
+  if (!user.email_verified_at) throw httpErr(403, 'Please verify your email before logging in.');
   (await db.run('UPDATE users SET failed_logins = 0, locked_until = 0 WHERE id = ?', [user.id]));
   if(user.mfa_enabled){
     const challengeId=crypto.randomUUID(),code=String(crypto.randomInt(0,1000000)).padStart(6,'0'),created=now();
