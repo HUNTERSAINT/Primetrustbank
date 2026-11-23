@@ -600,7 +600,7 @@ app.post('/api/admin/chat/sessions/:id/reply', adminAuth, wrap(async (req,res)=>
   const id=Number(req.params.id), message=String((req.body||{}).message||'').trim();
   if(!Number.isSafeInteger(id)||id<1||message.length<1||message.length>2000) throw httpErr(400,'Enter a reply of up to 2,000 characters.');
   const session=(await db.get('SELECT * FROM support_sessions WHERE id=?', [id])); if(!session) throw httpErr(404,'Support conversation not found.');
-  const t=now(),to=session.contact_email||(session.user_id?(await db.get('SELECT email FROM users WHERE id=?',[session.user_id]))||{}).email:null;
+  const t=now(),userContact=session.user_id?await db.get('SELECT email FROM users WHERE id=?',[session.user_id]):null,to=session.contact_email||(userContact||{}).email||null;
   const subject='[PT Support #'+id+'] '+String(session.subject||'Support request');
   const msg=(await db.run("INSERT INTO support_messages (session_id,sender_role,sender_name,message,created_at,email_status) VALUES (?,'admin','Prime Trust Support',?,?,?)", [id,message,t,to?'pending':'not_available'])).lastInsertRowid;
   (await db.run("UPDATE support_sessions SET status='open',updated_at=? WHERE id=?", [t,id]));
