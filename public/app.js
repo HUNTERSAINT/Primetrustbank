@@ -25,7 +25,7 @@
   var goalData = null; try { goalData = JSON.parse(localStorage.getItem('ptb_goal') || 'null'); } catch (_) {}
   var resetToken = new URLSearchParams(window.location.search).get('reset') || '';
   var mfaChallengeId = '';
-  var S = { me: null, txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, selectedTx: null, statementFrom: '', statementTo: '', transferDraft: null, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], externalTransfers: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], sessions: [], impersonation: { active: false }, cardReveal: null };
+  var S = { me: null, pendingEmail: '', txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, selectedTx: null, statementFrom: '', statementTo: '', transferDraft: null, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], externalTransfers: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], sessions: [], impersonation: { active: false }, cardReveal: null };
 
   // ---------- api ----------
   function api(method, url, body, idem) {
@@ -90,24 +90,33 @@
   }
   function vAuth(mode) {
     var reg = mode === 'register';
-    var kyc = reg ?
-      '<div class="section-label">Identity verification</div>' +
-      '<p class="lead">Complete KYC now. An administrator will review your documents before banking is enabled.</p>' +
-      kycFields('') : '';
     return '<section class="screen">' +
       '<div class="hd"><button class="circ" data-act="go" data-v="welcome" aria-label="Back">' + ic('back') + '</button><h4>' + (reg ? 'Create account' : 'Login') + '</h4><span></span></div>' +
       '<form class="form" data-form="' + mode + '" autocomplete="on">' +
       '<h2>' + (reg ? 'Open your account' : 'Welcome back') + '</h2>' +
-      '<p class="lead">' + (reg ? 'Create your profile and submit identity verification in one step.' : 'Log in to see your balance.') + '</p>' +
-      (reg ? '<label class="field">Full name<input name="full_name" autocomplete="name" required minlength="2" maxlength="80" placeholder="Ada Okafor"></label>' : '') +
+      '<p class="lead">' + (reg ? 'Create your profile. We will verify your email before identity verification.' : 'Log in to see your account.') + '</p>' +
+      (reg ? '<label class="field">Full name<input name="full_name" autocomplete="name" required minlength="2" maxlength="80" placeholder="Your full name"></label>' : '') +
       '<label class="field">Email<input name="email" type="email" autocomplete="email" required placeholder="you@example.com"></label>' +
       '<label class="field">Password<input name="password" type="password" autocomplete="' + (reg ? 'new-password' : 'current-password') + '" required minlength="12" maxlength="72" placeholder="At least 12 characters"></label>' +
-      (reg ? '<label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" autocomplete="off" required placeholder="4 digits"><span class="hint">You will enter this to approve payments.</span></label>' + kyc : '') +
+      (reg ? '<label class="field">Transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="\\d{4}" maxlength="4" autocomplete="off" required placeholder="4 digits"><span class="hint">Used to confirm account actions.</span></label>' : '') +
       '<p class="err" role="alert"></p>' +
-      '<button class="pillbtn w" type="submit">' + (reg ? 'Create account & submit KYC' : 'Login') + '</button>' +
+      '<button class="pillbtn w" type="submit">' + (reg ? 'Create account' : 'Login') + '</button>' +
       (reg ? '' : '<button type="button" class="muted" style="padding:8px" data-act="go" data-v="forgot">Forgot password?</button>') +
       '<button type="button" class="muted" style="padding:8px" data-act="go" data-v="' + (reg ? 'login' : 'register') + '">' + (reg ? 'I already have an account' : 'Create a new account') + '</button>' +
       '</form></section>';
+  }
+  function vEmailVerify() {
+    return '<section class="screen"><div class="brand">Prime Trust</div><div class="panel" style="margin-top:18px">' +
+      '<div class="ti" style="width:52px;height:52px;border-radius:16px;margin-bottom:16px">' + ic('user') + '</div>' +
+      '<h2>Verify your email</h2><p class="lead">We sent a 6-digit verification code to your email. Verify it to continue to identity verification.</p>' +
+      '<form class="form" data-form="email-verify" style="margin-top:16px">' +
+      '<label class="field">Email address<input name="email" type="email" autocomplete="email" required value="' + esc(S.pendingEmail || '') + '"></label>' +
+      '<label class="field">6-digit verification code<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="\\d{6}" maxlength="6" required placeholder="000000"></label>' +
+      '<p class="hint">The code expires in 10 minutes. Check your spam folder if it is not in your inbox.</p><p class="err" role="alert"></p>' +
+      '<button class="pillbtn w" type="submit">Verify email and continue</button>' +
+      '<button type="button" class="muted" style="padding:8px" data-act="resend-email">Send a new code</button>' +
+      '<button type="button" class="muted" style="padding:8px" data-act="go" data-v="login">Back to login</button>' +
+      '</form></div></section>';
   }
   function compressIdFile(file) {
     if (!file) return Promise.resolve('');
@@ -424,13 +433,14 @@
   // ---------- render ----------
   function render(prefill) {
     var html;
-    if (!S.me && !['login','register','forgot','reset','mfa-login'].includes(S.view)) S.view = 'welcome';
+    if (!S.me && !['login','register','forgot','reset','mfa-login','email-verify'].includes(S.view)) S.view = 'welcome';
     switch (S.view) {
       case 'login': html = vAuth('login'); break;
       case 'register': html = vAuth('register'); break;
       case 'forgot': html = vForgot(); break;
       case 'reset': html = vReset(); break;
       case 'mfa-login': html = vMfaLogin(); break;
+      case 'email-verify': html = vEmailVerify(); break;
       case 'mfa-setup': html = vMfaSetup(); break;
       case 'verification': html = vVerification(); break;
       case 'home': html = vHome(); break;
@@ -483,6 +493,7 @@
     var a = t.dataset.act;
     if (a === 'closebg') { if (ev.target === t) { S.sheet = null; S.cardReveal=null; render(); } return; }
     if (a === 'go') return go(t.dataset.v);
+    if (a === 'resend-email') { var em=S.pendingEmail||''; var input=app.querySelector('[name="email"]'); if(input&&input.value.trim())em=input.value.trim(); if(!em){toast('Enter your email address first');return;} api('POST','/api/auth/email-verification/resend',{email:em}).then(function(){S.pendingEmail=em;toast('If verification is needed, a new code was sent');}).catch(function(e){toast(e.message);}); return; }
     if (a === 'transaction') { S.selectedTx=S.txs.find(function(x){return String(x.id||x.transaction_id||x.reference||'')===String(t.dataset.id);})||null; return go('transaction-detail'); }
     if (a === 'clear-statement') { S.statementFrom='';S.statementTo='';return render(); }
     if (a === 'edit-transfer') { S.sheet='send';return render(S.transferDraft&&S.transferDraft.to_account); }
@@ -570,12 +581,8 @@
       p=api('POST','/api/auth/password-reset/confirm',{token:resetToken,password:d.password});
     }
     else if (kind === 'login') p = api('POST', '/api/auth/login', { email: d.email, password: d.password });
-    else if (kind === 'register') {
-      p=readKycImages(form).then(function(images){
-        d.id_front=images[0];d.id_back=images[1];d.selfie=images[2];d.proof_address=images[3];
-        return api('POST','/api/auth/register',d);
-      });
-    }
+    else if (kind === 'register') p=api('POST','/api/auth/register',{full_name:d.full_name,email:d.email,password:d.password,pin:d.pin});
+    else if (kind === 'email-verify') p=api('POST','/api/auth/email-verification/confirm',{email:d.email,code:d.code});
     else if (kind === 'verification') {
       p=readKycImages(form).then(function(images){
         d.id_front=images[0];d.id_back=images[1];d.selfie=images[2];d.proof_address=images[3];
@@ -609,6 +616,8 @@
     else return;
     p.then(function (res) {
       if (kind === 'login' && res.mfa_required) { mfaChallengeId=res.challenge_id;S.view='mfa-login';render();toast('Check your email for the sign-in code');return; }
+      if (kind === 'register' && res.email_verification_required) { S.pendingEmail=res.email||d.email;S.view='email-verify';render();toast('Check your email for the verification code');return; }
+      if (kind === 'email-verify') return load().then(function(){S.pendingEmail='';S.view='verification';render();toast('Email verified. Continue with identity verification.');});
       if (kind === 'card-reveal') { S.cardReveal=res.card; S.sheet='details'; render(); return; }
       if (kind === 'card-close') return load().then(function(){S.view='card';render();toast('Card deleted from dashboard');});
       if (kind === 'card-request') return load().then(function(){S.view='card';render();toast('Card request submitted for administrator review');});
@@ -628,13 +637,14 @@
       if (kind === 'beneficiary') return load().then(function(){S.view='beneficiary-manage';render();toast('Recipient saved');});
 
       if (kind === 'upgrade') return load().then(function(){S.view='verification';render();toast('Proof of address sent for review');});
-      if (kind === 'login' || kind === 'register' || kind === 'verification') return load().then(function () { S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; render(); toast(kind === 'verification' ? 'Submitted for administrator review' : kind === 'register' ? 'Account created; KYC submitted for review' : 'Logged in'); });
+      if (kind === 'login' || kind === 'verification') return load().then(function () { S.view = S.me.verification_status === 'approved' ? 'home' : 'verification'; render(); toast(kind === 'verification' ? 'Submitted for administrator review' : 'Logged in'); });
       var msg = (kind === 'send' || kind === 'send-confirm') ? 'Sent to ' + res.to : 'Bill paid';
       if(kind==='send-confirm')S.transferDraft=null;
       return done(msg);
     }).catch(function (e) {
       busy(form, false);
       setErr(form, e.message);
+      if (kind === 'login' && e.status === 403 && /verify your email/i.test(e.message)) { S.pendingEmail=d.email;S.view='email-verify';render();return; }
       if (e.status === 401 && S.me) { S.me = null; go('login'); }
     });
   });
