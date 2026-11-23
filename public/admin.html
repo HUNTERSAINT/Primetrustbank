@@ -165,6 +165,17 @@ main{padding-top:28px}
 /* Do not render an empty red notification dot when there are no unread items */
 .navbtn .count:empty{display:none!important;padding:0!important;border:0!important;box-shadow:none!important}
 .navbtn .count[hidden]{display:none!important}
+
+
+/* Mobile support inbox: compact list height and full conversation view */
+@media(max-width:600px){
+ .chatlayout{display:block!important;position:relative!important;height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important}
+ .chatlist{position:relative!important;inset:auto!important;display:flex!important;flex-direction:column!important;width:100%!important;height:auto!important;min-height:0!important;max-height:none!important;border:0!important;z-index:auto!important}
+ .chatqueue{flex:0 1 auto!important;min-height:0!important;max-height:38dvh!important;overflow-y:auto!important}
+ .chatlayout.chat-mobile-detail{height:calc(100dvh - 250px)!important;min-height:380px!important;max-height:720px!important;overflow:hidden!important}
+ .chatlayout.chat-mobile-detail .chatlist{display:none!important}
+ .chatlayout.chat-mobile-detail .chatpane{display:flex!important;position:absolute!important;inset:0!important;width:100%!important;height:100%!important;min-height:0!important;z-index:2!important}
+}
 </style></head><body><main>
 <header class="top"><div><div class="brand">Prime Trust <small>/ ADMIN CONSOLE</small></div><div class="muted small" style="margin-top:4px">Customer operations & account oversight</div></div><div class="topright"><span class="pill">Secure administrator session</span><button id="logout" class="btn ghost hidden">Sign out</button></div></header>
 <section id="login" class="panel loginwrap"><h1 style="font:700 30px 'Space Grotesk';margin:0 0 8px">Administrator sign in</h1><p class="muted" style="line-height:1.6">Sign in to manage customer accounts, identity reviews, transactions and support.</p><form id="loginForm"><label class="field">Admin email<input name="email" type="email" required autocomplete="username"></label><label class="field">Password<input name="password" type="password" required autocomplete="current-password"></label><div class="error" id="loginErr"></div><button class="btn primary">Sign in securely</button></form></section>
@@ -182,4 +193,4 @@ main{padding-top:28px}
 <button class="navbtn" data-page="notifications"><span class="navico">♧</span>Notifications<span class="count" id="adminNotificationCount"></span></button>
 <button class="navbtn" data-page="audit"><span class="navico">≡</span>Admin activity</button>
 </nav><div class="content" id="content"></div></section>
-</main><script src="/admin.js?v=20261123-us-eastern"></script></body></html>
+</main><script src="/admin.js?v=20261123-chat-mobile-layout"></script></body></html>
