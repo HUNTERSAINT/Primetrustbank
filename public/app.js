@@ -677,7 +677,7 @@
       if (kind === 'card-settings') return load().then(function(){S.view='card';render();toast('Card controls updated');});
       if (kind === 'card-pin') return load().then(function(){S.view='card';render();toast('Card PIN saved');});
       if (kind === 'card-replace') return load().then(function(){S.sheet=null;S.view='card';render();toast('Card replaced. Activate it and set a new PIN.');});
-      if (kind === 'mfa-login') { mfaChallengeId='';return load().then(function(){S.view=S.me.verification_status==='approved'?'home':'verification';render();toast('Signed in securely');}); }
+      if (kind === 'mfa-login') { mfaChallengeId=''; return api('GET','/api/me').then(function(me){ S.me=me; S.view=me.verification_status==='approved'?'home':'verification'; render(); toast('Code verified. You are signed in.'); load().then(function(){render();}).catch(function(){}); }).catch(function(e){ S.me=null; S.view='login'; render(); toast('The code was accepted, but we could not confirm your sign-in session. Please sign in again.'); }); }
       if (kind === 'mfa-setup') { mfaChallengeId='';return load().then(function(){S.view='security';render();toast('Multi-factor authentication enabled');}); }
       if (kind === 'mfa-disable') return load().then(function(){S.sheet=null;S.view='security';render();toast('Multi-factor authentication disabled');});
       if (kind === 'pin-recovery-request') { pinResetChallengeId=res.challenge_id;S.view='security';render();toast('Recovery code sent to your verified email');return; }
