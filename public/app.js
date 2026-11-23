@@ -25,7 +25,7 @@
   var goalData = null; try { goalData = JSON.parse(localStorage.getItem('ptb_goal') || 'null'); } catch (_) {}
   var resetToken = new URLSearchParams(window.location.search).get('reset') || '';
   var mfaChallengeId = '';
-  var S = { me: null, pendingEmail: '', txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, selectedTx: null, statementFrom: '', statementTo: '', transferDraft: null, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], externalTransfers: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], sessions: [], impersonation: { active: false }, cardReveal: null };
+  var S = { me: null, pendingEmail: '', depositOptions: null, depositRequests: [], txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, selectedTx: null, statementFrom: '', statementTo: '', transferDraft: null, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], externalTransfers: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], sessions: [], impersonation: { active: false }, cardReveal: null };
 
   // ---------- api ----------
   function api(method, url, body, idem) {
@@ -351,14 +351,19 @@
       '<p class="err" role="alert"></p><button class="pillbtn w" type="submit">Pay bill</button></form>');
   }
   function sFund() {
-    var me = S.me;
+    var data=S.depositOptions||{},bank=data.bank||{},wallets=data.wallets||[],requests=S.depositRequests||[];
+    var walletCards=wallets.map(function(w){return '<div class="panel" style="margin:10px 0;padding:12px"><div class="kv"><span>Asset / network</span><b>'+esc(w.asset)+' · '+esc(w.network)+'</b></div><div class="kv"><span>Wallet</span><b>'+esc(w.name)+'</b></div><div class="kv"><span>Address</span><b style="word-break:break-all">'+esc(w.address)+'</b></div>'+(w.qr_url?'<img alt="Deposit QR" src="'+esc(w.qr_url)+'" style="display:block;max-width:180px;max-height:180px;margin:10px auto;border-radius:12px">':'')+(w.instructions?'<p class="hint">'+esc(w.instructions)+'</p>':'')+'<button type="button" class="pillbtn d w" data-act="copy-wallet" data-address="'+esc(w.address)+'">Copy wallet address</button></div>';}).join('');
+    var requestRows=requests.map(function(q){return '<div class="kv"><span>#'+esc(q.id)+' · '+esc(q.method)+'</span><b>'+esc(q.currency)+' '+money(q.amount)+' · '+esc(q.status)+'</b></div>';}).join('');
     return sheetWrap('Add funds',
-      '<p class="muted" style="margin-bottom:8px">Send money to this account to fund it.</p>' +
-      '<div class="kv"><span>Bank</span><b>Prime Trust Bank</b></div>' +
-      '<div class="kv"><span>Account name</span><b>' + esc(me.name) + '</b></div>' +
-      '<div class="kv"><span>Account number</span><b>' + esc(me.account.number) + '</b></div>' +
-      '<button class="pillbtn w" style="margin-top:16px" data-act="copy">Copy account number</button>' +
-      (me.sandbox_funding ? '<button class="pillbtn d" style="margin-top:10px" data-act="testfunds">Add 500.00 test funds</button>' : ''));
+      '<p class="hint">Deposits are manually reviewed. Your balance changes only after an administrator verifies the transfer.</p>'+
+      (bank.bank_name?'<div class="panel" style="padding:12px;margin:10px 0"><h4 style="margin:0 0 8px">Bank transfer details</h4><div class="kv"><span>Bank</span><b>'+esc(bank.bank_name)+'</b></div><div class="kv"><span>Account name</span><b>'+esc(bank.account_name)+'</b></div><div class="kv"><span>Account number</span><b>'+esc(bank.account_number)+'</b></div>'+(bank.account_type?'<div class="kv"><span>Account type</span><b>'+esc(bank.account_type)+'</b></div>':'')+'<div class="kv"><span>Currency</span><b>'+esc(bank.currency||'USD')+'</b></div>'+(bank.instructions?'<p class="hint">'+esc(bank.instructions)+'</p>':'')+'<p class="hint">Use your verified name as the transfer sender: <b>'+esc(S.me.name)+'</b>. This is a shared receiving account configured by the bank administrator.</p></div>':'<div class="panel" style="padding:12px;margin:10px 0"><b>Bank details not configured</b><p class="hint">The administrator has not added receiving bank details yet.</p></div>')+
+      (walletCards||'<div class="panel" style="padding:12px;margin:10px 0"><b>No crypto wallets configured</b><p class="hint">The administrator has not added a receiving wallet yet.</p></div>')+
+      '<form class="form" data-form="deposit-request"><label class="field">Deposit method<select name="method" required><option value="bank">Bank transfer</option><option value="crypto">Cryptocurrency</option></select></label>'+
+      '<label class="field" data-wallet-field hidden>Crypto wallet<select name="wallet_id">'+wallets.map(function(w){return '<option value="'+esc(w.id)+'">'+esc(w.asset+' · '+w.network+' · '+w.name)+'</option>';}).join('')+'</select></label>'+
+      '<label class="field">Amount (USD)<input name="amount" type="number" min="0.01" max="1000000" step="0.01" required placeholder="0.00"></label>'+
+      '<label class="field"><span data-reference-label>Bank transfer reference</span><input name="reference" required minlength="4" maxlength="200" placeholder="Reference from your bank transfer"></label>'+
+      '<p class="hint">Submit only after you have sent the funds. Do not send crypto on a different network than the wallet shown above.</p><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Submit deposit for review</button></form>'+
+      '<div class="sub" style="margin-top:18px">Recent deposit requests</div>'+(requestRows||'<p class="empty">No deposit requests yet.</p>'));
   }
   function sGoal() {
     var g=S.goal||{name:'',target:'',saved:''};
@@ -472,7 +477,7 @@
     if (S.sheet || S.view === 'login' || S.view === 'register') { if (f) f.focus({ preventScroll: true }); }
   }
   function go(v) { S.view = v; S.sheet = null; if(v==='sessions'){api('GET','/api/security/sessions').then(function(d){S.sessions=d.sessions||[];render();}).catch(function(e){toast(e.message);render();});} else if(v==='support'){ api('GET','/api/support/messages').then(function(d){S.support=d;render();}).catch(function(e){toast(e.message);render();}); } else render(); }
-  function openSheet(s, prefill) { S.sheet = s; S.idem = uuid(); render(prefill); if (s === 'send' && prefill) lookup(prefill); }
+  function openSheet(s, prefill) { S.sheet = s; S.idem = uuid(); render(prefill); if (s === 'send' && prefill) lookup(prefill); if(s==='fund'){S.depositOptions=null;api('GET','/api/deposit/options').then(function(d){S.depositOptions=d;return api('GET','/api/deposit/requests');}).then(function(d){S.depositRequests=d.requests||[];if(S.sheet==='fund')render();}).catch(function(e){toast(e.message);});} }
 
   // ---------- behaviour ----------
   function lookup(n) {
@@ -530,11 +535,8 @@
       return;
     }
     if (a === 'addfunds') return openSheet('fund');
+    if (a === 'copy-wallet') {var wa=t.dataset.address||'';(navigator.clipboard?navigator.clipboard.writeText(wa):Promise.reject()).then(function(){toast('Wallet address copied');},function(){toast(wa);});return;}
     if (a === 'statement') { var rows = [['Date','Type','Description','Amount USD','Balance USD']].concat(S.txs.filter(function(t){var day=String(t.created_at||'').slice(0,10);return (!S.statementFrom||day>=S.statementFrom)&&(!S.statementTo||day<=S.statementTo);}).map(function (t) { return [new Date(t.created_at).toISOString(),t.type,t.counterparty,(t.amount/100).toFixed(2),(t.balance_after/100).toFixed(2)]; })); var csv = rows.map(function (row) { return row.map(function (v) { return '"' + String(v).replace(/"/g,'""') + '"'; }).join(','); }).join(String.fromCharCode(13,10)); var blob = new Blob([csv],{type:'text/csv;charset=utf-8'}), url = URL.createObjectURL(blob), link = document.createElement('a'); link.href=url; link.download='prime-trust-statement.csv'; link.click(); URL.revokeObjectURL(url); toast('Statement exported'); return; }
-    if (a === 'testfunds') {
-      api('POST', '/api/deposit', { amount: 500 }, uuid()).then(function () { return done('USD 500.00 test funds added'); }).catch(function (e) { toast(e.message); });
-      return;
-    }
     if (a === 'delete-card') {var pin=prompt('Enter your 4-digit transaction PIN to delete this card from your dashboard');if(pin===null)return;if(!/^\\d{4}$/.test(pin)){toast('Enter a valid 4-digit transaction PIN');return;}if(!confirm('Permanently delete this card from your dashboard? This cannot be undone.'))return;api('DELETE','/api/card',{transaction_pin:pin}).then(function(){return load();}).then(function(){S.view='card';render();toast('Card deleted from dashboard');}).catch(function(e){toast(e.message);});return;}
     if (a === 'freeze') {
       var want = !S.me.card.frozen;
@@ -550,6 +552,7 @@
     if (ev.target.name === 'to_account') lookup(ev.target.value.trim());
   });
   app.addEventListener('change', function (ev) {
+    if(ev.target.name==='method'){var form=ev.target.closest('form[data-form="deposit-request"]'),wf=form&&form.querySelector('[data-wallet-field]'),ref=form&&form.querySelector('[name="reference"]'),label=form&&form.querySelector('[data-reference-label]');if(wf){var crypto=ev.target.value==='crypto';wf.hidden=!crypto;wf.querySelector('select').required=crypto;if(ref){ref.minLength=crypto?20:4;ref.placeholder=crypto?'Blockchain transaction hash':'Reference from your bank transfer';}if(label)label.textContent=crypto?'Crypto transaction hash':'Bank transfer reference';}}
     if (ev.target.matches('[data-statement-from]')) { S.statementFrom=ev.target.value;render(); }
     if (ev.target.matches('[data-statement-to]')) { S.statementTo=ev.target.value;render(); }
     if (ev.target.name==='intl_recipient_country') {var cf=ev.target.closest('form[data-form="external-transfer"]'),other=cf&&cf.querySelector('[data-country-other]'),otherInput=cf&&cf.querySelector('[name="intl_recipient_country_other"]');if(other&&otherInput){var showOther=ev.target.value==='Other'&&cf.querySelector('[name="transfer_type"]').value==='international';other.hidden=!showOther;otherInput.required=showOther;}}
@@ -592,6 +595,7 @@
     else if (kind === 'upgrade') {
       p=compressIdFile(form.elements.proof_address.files[0]).then(function(img){return api('POST','/api/verification/upgrade',{proof_address:img});});
     }
+    else if (kind === 'deposit-request') p=api('POST','/api/deposit/requests',{method:d.method,amount:d.amount,reference:d.reference,wallet_id:d.wallet_id},S.idem);
     else if (kind === 'support') p = api('POST', '/api/support/messages', {message:d.message});
 
     else if (kind === 'schedule') {
@@ -618,6 +622,7 @@
       if (kind === 'login' && res.mfa_required) { mfaChallengeId=res.challenge_id;S.view='mfa-login';render();toast('Check your email for the sign-in code');return; }
       if (kind === 'register' && res.email_verification_required) { S.pendingEmail=res.email||d.email;S.view='email-verify';render();toast('Check your email for the verification code');return; }
       if (kind === 'email-verify') return load().then(function(){S.pendingEmail='';S.view='verification';render();toast('Email verified. Continue with identity verification.');});
+      if (kind === 'deposit-request') return api('GET','/api/deposit/requests').then(function(d){S.depositRequests=d.requests||[];return load();}).then(function(){S.sheet=null;render();toast('Deposit request submitted for manual review');});
       if (kind === 'card-reveal') { S.cardReveal=res.card; S.sheet='details'; render(); return; }
       if (kind === 'card-close') return load().then(function(){S.view='card';render();toast('Card deleted from dashboard');});
       if (kind === 'card-request') return load().then(function(){S.view='card';render();toast('Card request submitted for administrator review');});
