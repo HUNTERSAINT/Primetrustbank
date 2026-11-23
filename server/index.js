@@ -451,7 +451,7 @@ app.get('/api/admin/crypto-deposit/requests/:id/proof',adminAuth,wrap(async(req,
  const row=await db.get('SELECT screenshot_data FROM crypto_deposit_requests WHERE id=?',[id]);
  if(!row)throw httpErr(404,'Deposit request not found.');
  if(!row.screenshot_data)throw httpErr(404,'No transaction screenshot was uploaded for this request.');
- const match=/^data:image\\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(row.screenshot_data);
+ const match=/^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(row.screenshot_data);
  if(!match)throw httpErr(500,'Stored transaction screenshot is invalid.');
  res.set('Cache-Control','no-store, private');
  res.type('jpeg').send(Buffer.from(match[1],'base64'));
@@ -935,7 +935,7 @@ app.post('/api/crypto-deposit/requests',auth,requireVerified,moneyLimiter,wrap(a
  if(hash.length<16||hash.length>200||!/^[A-Za-z0-9:_-]+$/.test(hash))throw httpErr(400,'Enter a valid transaction hash.');
  if(!Number.isSafeInteger(walletId)||walletId<1)throw httpErr(400,'Choose a crypto deposit option.');
  const screenshot=String(b.screenshot_data||'').trim();
- const match=/^data:image\\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(screenshot);
+ const match=/^data:image\/jpeg;base64,([A-Za-z0-9+/]+={0,2})$/.exec(screenshot);
  if(!match)throw httpErr(400,'Upload a valid transaction screenshot.');
  const imageBytes=Buffer.from(match[1],'base64');
  if(!imageBytes.length||imageBytes.length>1100000)throw httpErr(400,'Transaction screenshot is too large after compression. Choose a smaller image.');
