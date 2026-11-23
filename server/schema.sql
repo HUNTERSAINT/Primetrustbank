@@ -5,6 +5,7 @@
 CREATE TABLE IF NOT EXISTS users (
   id                        BIGSERIAL PRIMARY KEY,
   email                     TEXT NOT NULL UNIQUE,
+  email_verified_at          BIGINT DEFAULT 1,
   full_name                 TEXT NOT NULL,
   password_hash             TEXT NOT NULL,
   pin_hash                  TEXT NOT NULL,
@@ -20,6 +21,20 @@ CREATE TABLE IF NOT EXISTS users (
   session_version           INTEGER NOT NULL DEFAULT 0,
   kyc_tier                  INTEGER NOT NULL DEFAULT 0 CHECK (kyc_tier BETWEEN 0 AND 2)
 );
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at BIGINT DEFAULT 1;
+
+CREATE TABLE IF NOT EXISTS email_verification_codes (
+  id         BIGSERIAL PRIMARY KEY,
+  user_id    BIGINT NOT NULL REFERENCES users(id),
+  code_hash  TEXT NOT NULL,
+  expires_at BIGINT NOT NULL,
+  attempts   INTEGER NOT NULL DEFAULT 0,
+  used_at    BIGINT,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_email_verification_user ON email_verification_codes(user_id, created_at DESC);
+ALTER TABLE email_verification_codes ENABLE ROW LEVEL SECURITY;
 
 CREATE TABLE IF NOT EXISTS accounts (
   id             BIGSERIAL PRIMARY KEY,
