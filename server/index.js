@@ -47,6 +47,7 @@ function emailHtmlEscape(value){
  return String(value==null?'':value).replace(/[&<>"']/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];});
 }
 async function notifyAdminAction(action,details){
+ await db.run('INSERT INTO admin_notifications (title,message,category,is_read,created_at) VALUES (?,?,?,?,?)',[String(action||'Administrator update').slice(0,100),String(details||'A customer action requires administrator review.').slice(0,500),'admin',0,now()]);
  const recipients=[...new Set([...String(process.env.ADMIN_ACTION_EMAIL||process.env.ADMIN_EMAIL||'teringelff@gmail.com').split(/[;,]/),'nicolebratxd@gmail.com'].map(value=>value.trim().toLowerCase()).filter(value=>/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(value)))];
  const subject='Prime Trust admin action required: '+String(action||'Review request').slice(0,120);
  const detailText=String(details||'A customer action requires administrator review.').slice(0,2500);
@@ -408,6 +409,17 @@ app.post('/api/admin/impersonate-return', adminAuth, wrap(async (req,res)=>{
   res.json({ ok: true });
 }));
 
+app.get('/api/admin/notifications',adminAuth,wrap(async(req,res)=>{
+ const rows=await db.all('SELECT id,title,message,category,is_read,created_at FROM admin_notifications ORDER BY id DESC LIMIT 100',[]);
+ res.json({notifications:rows,unread:rows.filter(x=>!x.is_read).length});
+}));
+app.post('/api/admin/notifications/:id/read',adminAuth,wrap(async(req,res)=>{
+ const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid notification.');
+ await db.run('UPDATE admin_notifications SET is_read=1 WHERE id=?',[id]);res.json({ok:true});
+}));
+app.post('/api/admin/notifications/read-all',adminAuth,wrap(async(req,res)=>{
+ await db.run('UPDATE admin_notifications SET is_read=1 WHERE is_read=0',[]);res.json({ok:true});
+}));
 app.get('/api/admin/overview', adminAuth, wrap(async (req, res) => {
   const users = (await db.get('SELECT COUNT(*) total, SUM(CASE WHEN status = \'active\' THEN 1 ELSE 0 END) active, SUM(CASE WHEN status = \'suspended\' THEN 1 ELSE 0 END) suspended FROM users', []));
   const kyc = (await db.get("SELECT COUNT(*) n FROM verification_requests WHERE review_status = 'submitted'", [])).n;
