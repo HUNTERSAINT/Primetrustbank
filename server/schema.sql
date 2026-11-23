@@ -330,19 +330,3 @@ ALTER TABLE card_requests ADD COLUMN IF NOT EXISTS card_tier TEXT NOT NULL DEFAU
 ALTER TABLE card_requests ADD COLUMN IF NOT EXISTS physical_requested INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE card_requests ADD COLUMN IF NOT EXISTS physical_fee_cents BIGINT NOT NULL DEFAULT 0;
 INSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-CARD-FEES', 'system', 0) ON CONFLICT (account_number) DO NOTHING;
-
--- Admin-configured receiving details and manually reviewed deposit requests.
-CREATE TABLE IF NOT EXISTS deposit_settings (
- id INTEGER PRIMARY KEY CHECK (id=1),bank_name TEXT NOT NULL DEFAULT '',account_name TEXT NOT NULL DEFAULT '',account_number TEXT NOT NULL DEFAULT '',account_type TEXT NOT NULL DEFAULT '',currency TEXT NOT NULL DEFAULT 'USD',instructions TEXT NOT NULL DEFAULT '',updated_at BIGINT,updated_by TEXT
-);
-INSERT INTO deposit_settings (id) VALUES (1) ON CONFLICT(id) DO NOTHING;
-CREATE TABLE IF NOT EXISTS crypto_wallets (
- id BIGSERIAL PRIMARY KEY,name TEXT NOT NULL,asset TEXT NOT NULL,network TEXT NOT NULL,address TEXT NOT NULL,qr_url TEXT,instructions TEXT NOT NULL DEFAULT '',active INTEGER NOT NULL DEFAULT 1,created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_crypto_wallet_active ON crypto_wallets(active,id);
-CREATE TABLE IF NOT EXISTS deposit_requests (
- id BIGSERIAL PRIMARY KEY,user_id BIGINT NOT NULL REFERENCES users(id),account_id BIGINT NOT NULL REFERENCES accounts(id),method TEXT NOT NULL CHECK(method IN ('bank','crypto')),amount BIGINT NOT NULL CHECK(amount>0),currency TEXT NOT NULL DEFAULT 'USD',depositor_name TEXT NOT NULL,reference TEXT NOT NULL,wallet_id BIGINT,wallet_name TEXT,wallet_network TEXT,wallet_address TEXT,status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','confirmed','rejected')),review_note TEXT,reviewed_by TEXT,reviewed_at BIGINT,ledger_tx_id BIGINT UNIQUE,created_at BIGINT NOT NULL,updated_at BIGINT NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_deposit_reference_unique ON deposit_requests(lower(reference));
-CREATE INDEX IF NOT EXISTS idx_deposit_request_status ON deposit_requests(status,created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_deposit_request_user ON deposit_requests(user_id,created_at DESC);
