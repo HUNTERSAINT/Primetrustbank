@@ -455,13 +455,23 @@ app.get('/api/admin/crypto-deposit/requests',adminAuth,wrap(async(req,res)=>{
 }));
 app.patch('/api/admin/crypto-deposit/requests/:id',adminAuth,wrap(async(req,res)=>{
  const id=Number(req.params.id),status=String((req.body||{}).status||''),note=String((req.body||{}).admin_note||'').trim().slice(0,500);
+ const credit=cents((req.body||{}).credited_amount_usd);
  if(!Number.isSafeInteger(id)||id<1||!['verified','rejected'].includes(status))throw httpErr(400,'Invalid deposit review action.');
+ if(status==='verified'&&(!credit||credit>100000000))throw httpErr(400,'Enter the verified USD value to credit (up to two decimal places).');
  const row=await db.get("SELECT id,user_id,status,amount_crypto,asset,network,transaction_hash FROM crypto_deposit_requests WHERE id=?",[id]);
  if(!row)throw httpErr(404,'Deposit request not found.');
  if(row.status!=='pending')throw httpErr(409,'This deposit request has already been reviewed.');
- await db.run("UPDATE crypto_deposit_requests SET status=?,admin_note=?,reviewed_at=?,reviewed_by=? WHERE id=? AND status='pending'",[status,note||null,now(),String(req.admin.email||'admin'),id]);
- await auditAdmin(req,'CRYPTO_DEPOSIT_'+status.toUpperCase(),row.user_id,null,'Request #'+id+' '+row.asset+' '+row.amount_crypto+' '+row.network+'; hash='+row.transaction_hash);
- res.json({ok:true,status,credited:false});
+ const account=await db.get("SELECT * FROM accounts WHERE user_id=? AND kind='user'",[row.user_id]);
+ if(!account)throw httpErr(404,'Customer account not found.');
+ const sys=await db.get("SELECT * FROM accounts WHERE account_number='SYS-ADMIN-ADJUST'",[]);
+ const result=await db.tx(async()=>{
+  const changed=await db.run("UPDATE crypto_deposit_requests SET status=?,admin_note=?,credited_amount_cents=?,reviewed_at=?,reviewed_by=? WHERE id=? AND status='pending'",[status,note||null,status==='verified'?credit:null,now(),String(req.admin.email||'admin'),id]);
+  if(!changed.changes)throw httpErr(409,'This deposit request has already been reviewed.');
+  if(status==='verified')await move({from:sys,to:account,amount:credit,typeOut:'crypto_deposit_funding_out',typeIn:'crypto_deposit',counterOut:'Crypto deposit funding',counterIn:row.asset+' deposit',note:'Crypto deposit #'+id+': '+row.amount_crypto+' '+row.asset+' on '+row.network+'; hash '+row.transaction_hash+(note?'; '+note:'')});
+  await auditAdmin(req,'CRYPTO_DEPOSIT_'+status.toUpperCase(),row.user_id,status==='verified'?credit:null,'Request #'+id+' '+row.asset+' '+row.amount_crypto+' '+row.network+'; hash='+row.transaction_hash+(status==='verified'?'; credited USD '+(credit/100).toFixed(2):''));
+  return {credited:status==='verified'?credit:0};
+ });
+ res.json({ok:true,status,credited:result.credited,credited_amount_usd:result.credited?result.credited/100:null});
 }));
 
 app.get('/api/admin/card-requests', adminAuth, wrap(async (req,res)=>{
