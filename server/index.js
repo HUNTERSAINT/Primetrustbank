@@ -881,6 +881,27 @@ app.post('/api/auth/password-reset/confirm',authLimiter,wrap(async (req,res)=>{
   }));
   res.json({ok:true});
 }));
+app.post('/api/auth/mfa/resend',authLimiter,wrap(async (req,res)=>{
+  const id=String((req.body||{}).challenge_id||'');
+  if(!/^[0-9a-f-]{36}$/i.test(id))throw httpErr(400,'Sign-in session is invalid. Please sign in again.');
+  const old=await db.get("SELECT * FROM mfa_challenges WHERE id=? AND purpose='login'",[id]);
+  if(!old||old.used_at||old.expires_at<=now())throw httpErr(400,'This sign-in code request has expired. Please sign in again.');
+  if(old.created_at>now()-30*1000)throw httpErr(429,'Please wait 30 seconds before requesting another sign-in code.');
+  const user=await db.get('SELECT email,status,mfa_enabled FROM users WHERE id=?',[old.user_id]);
+  if(!user||user.status==='suspended'||!user.mfa_enabled)throw httpErr(403,'This account cannot complete sign-in verification.');
+  const newId=crypto.randomUUID(),code=String(crypto.randomInt(0,1000000)).padStart(6,'0'),created=now();
+  const codeHash=crypto.createHash('sha256').update(newId+':'+code+':'+JWT_SECRET).digest('hex');
+  await db.run("INSERT INTO mfa_challenges (id,user_id,purpose,code_hash,expires_at,created_at) VALUES (?,?,'login',?,?,?)",[newId,old.user_id,codeHash,created+5*60*1000,created]);
+  try{
+    await sendTransactionalEmail(user.email,'Prime Trust sign-in code','Your new sign-in verification code is '+code+'. It expires in 5 minutes. Only the newest code will work.','<p>Your new Prime Trust sign-in code is:</p><h2 style="letter-spacing:6px">'+code+'</h2><p>It expires in 5 minutes. Only the newest code will work. If you did not try to sign in, change your password.</p>');
+  }catch(err){
+    await db.run('UPDATE mfa_challenges SET used_at=? WHERE id=?',[now(),newId]);
+    throw err;
+  }
+  await db.run('UPDATE mfa_challenges SET used_at=? WHERE id=?',[now(),id]);
+  res.json({ok:true,challenge_id:newId});
+}));
+
 app.post('/api/auth/mfa/verify',authLimiter,wrap(async (req,res)=>{
   const b=req.body||{},id=String(b.challenge_id||''),code=String(b.code||'');
   if(!/^[0-9a-f-]{36}$/i.test(id)||!/^\d{6}$/.test(code))throw httpErr(400,'Enter the 6-digit verification code.');
