@@ -20,6 +20,7 @@ async function renderPage(){
  if(S.page==='overview')return overview();
  if(S.page==='users')return users();
  if(S.page==='card-requests')return cardRequests();
+ if(S.page==='crypto-deposits')return cryptoDeposits();
  if(S.page==='external-transfers')return externalTransfers();
  if(S.page==='user-detail')return userDetail();
  if(S.page==='kyc')return kyc();
@@ -29,6 +30,17 @@ async function renderPage(){
  if(S.page==='email')return email();
  if(S.page==='audit')return audit();
 }
+
+async function cryptoDeposits(){
+ const [w,d]=await Promise.all([api('GET','/api/admin/crypto-deposit/settings'),api('GET','/api/admin/crypto-deposit/requests?status=pending')]);
+ const rows=(d.requests||[]).map(r=>'<tr><td>#'+esc(r.id)+'<small class="muted" style="display:block">'+date(r.created_at)+'</small></td><td>'+customer({full_name:r.full_name,email:r.email})+'<small class="muted" style="display:block">User #'+esc(r.user_id)+'</small></td><td><b>'+esc(r.amount_crypto)+' '+esc(r.asset)+'</b><small class="muted" style="display:block">'+esc(r.network)+'</small></td><td><code style="overflow-wrap:anywhere">'+esc(r.transaction_hash)+'</code></td><td>'+badge(r.status)+'</td><td><div class="row"><button class="btn good" data-act="crypto-review" data-id="'+esc(r.id)+'" data-status="verified">Verify</button><button class="btn danger" data-act="crypto-review" data-id="'+esc(r.id)+'" data-status="rejected">Reject</button></div></td></tr>').join('');
+ root.innerHTML=head('Crypto deposits','Configure the wallet customers see and review submitted transaction hashes. Verify each hash on the selected network before marking it verified.')+
+ '<div class="panel section"><h2 class="title2">Receiving wallet</h2><p class="muted small">Only enable this after confirming you control the wallet and can receive the selected asset on the selected network.</p><form class="form" data-form="crypto-wallet"><label class="field">Enable crypto deposits<select name="enabled"><option value="0" '+(!w.enabled?'selected':'')+'>Disabled</option><option value="1" '+(w.enabled?'selected':'')+'>Enabled</option></select></label><div class="grid two"><label class="field">Asset / coin<input name="asset" maxlength="20" required value="'+esc(w.asset||'')+'" placeholder="USDT"></label><label class="field">Network<input name="network" maxlength="80" required value="'+esc(w.network||'')+'" placeholder="TRON (TRC20)"></label></div><label class="field">Wallet address<textarea name="wallet_address" rows="3" maxlength="200" required>'+esc(w.wallet_address||'')+'</textarea></label><label class="field">Customer instructions<textarea name="instructions" rows="4" maxlength="1000" placeholder="Include any required memo/tag and confirmation guidance">'+esc(w.instructions||'')+'</textarea></label><button class="btn primary">Save wallet settings</button></form></div>'+
+ '<div class="grid stats">'+stat('Pending requests',d.pending||0,'Awaiting blockchain review')+stat('Requests shown',rows? (d.requests||[]).length:0,'Pending only')+'</div>'+
+ '<div class="panel section"><div class="row space"><h2 class="title2">Crypto deposit requests</h2><button class="btn" data-act="refresh">Refresh</button></div>'+table(['Request','Customer','Amount','Transaction hash','Status','Review'],rows)+(rows?'':noRows('No pending crypto deposit requests.'))+'</div>'+
+ '<p class="muted small section">Marking a request verified only records the review decision. It does not credit the customer balance; reconcile any actual receipt separately and only after confirming the on-chain transfer.</p>';
+}
+
 async function overview(){
  const d=await api('GET','/api/admin/overview'),s=d.stats;
  $('#kycCount').textContent=s.pendingKyc||0;$('#chatCount').textContent=s.openChats||0;
@@ -160,6 +172,7 @@ root.addEventListener('click',async e=>{
   if(a==='physical-delivered'){if(!confirm('Confirm the physical card has been delivered to the customer?'))return;await api('PATCH','/api/admin/users/'+b.dataset.id+'/card/physical-status',{status:'delivered'});notify('Physical card delivery confirmed. Customer can now activate the card.');await userDetail();return;}
   if(a==='card'){const frozen=b.dataset.frozen==='true';if(!confirm((frozen?'Freeze':'Unfreeze')+' this customer card?'))return;await api('PATCH','/api/admin/users/'+b.dataset.id+'/card',{frozen});notify(frozen?'Customer card frozen.':'Customer card unfrozen.');await userDetail();return;}
   if(a==='external-transfer-review'){const id=b.dataset.id,status=b.dataset.status;let transfer_reference='',review_note='';if(status==='completed'){transfer_reference=prompt('Enter the actual bank transfer reference from the bank/provider:');if(!transfer_reference||transfer_reference.trim().length<4)return;}if(status==='rejected'){review_note=prompt('Reason for declining this request (funds will be refunded):');if(!review_note||review_note.trim().length<3)return;}if(status==='processing'){review_note=prompt('Optional processing note:')||'';}if(!confirm(status==='completed'?'Confirm the bank transfer has actually been sent and mark this request completed?':status==='rejected'?'Decline this request and return the reserved funds?':'Move this request to processing?'))return;b.disabled=true;await api('POST','/api/admin/external-transfers/'+id+'/review',{status,transfer_reference,review_note});notify(status==='completed'?'Transfer marked completed.':'Transfer request updated.');await externalTransfers();return;}
+  if(a==='crypto-review'){const status=b.dataset.status,id=b.dataset.id;if(!confirm((status==='verified'?'Verify':'Reject')+' crypto deposit request #'+id+'? Verify the transaction hash on the exact network first. This action does not credit the account.'))return;const admin_note=prompt('Review note (optional):')||'';await api('PATCH','/api/admin/crypto-deposit/requests/'+id,{status,admin_note});notify('Crypto deposit request marked '+status+'. No balance was credited.');await cryptoDeposits();return;}
   if(a==='issue-card'){if(!confirm('Approve this card request and grant the requested card?'))return;await api('POST','/api/admin/users/'+b.dataset.id+'/card/issue',{});notify('Card request approved.');if(b.dataset.from==='card-requests')await cardRequests();else await userDetail();return;}
   if(a==='reject-card'){if(!confirm('Decline this customer card request?'))return;await api('POST','/api/admin/users/'+b.dataset.id+'/card/reject',{});notify('Card request declined.');if(b.dataset.from==='card-requests')await cardRequests();else await userDetail();return;}
   if(a==='kyc-review'){const decision=b.dataset.decision,id=b.dataset.id;if(!confirm((decision==='approved'?'Approve':'Reject')+' this identity verification?'))return;b.disabled=true;const note=$('[data-note="'+id+'"]').value;await api('POST','/api/admin/requests/'+id+'/review',{decision,note,tier:Number(b.dataset.tier||1)});notify('Identity review updated.');await kyc();return;}
@@ -186,6 +199,7 @@ root.addEventListener('input',e=>{
 root.addEventListener('submit',async e=>{
  const form=e.target.closest('form[data-form]');if(!form)return;e.preventDefault();const data=Object.fromEntries(new FormData(form));const type=form.dataset.form;
  try{
+  if(type==='crypto-wallet'){await api('PATCH','/api/admin/crypto-deposit/settings',{enabled:data.enabled==='1',asset:data.asset,network:data.network,wallet_address:data.wallet_address,instructions:data.instructions});notify('Crypto wallet settings saved.');await cryptoDeposits();return;}
   if(type==='physical-card-fee'){await api('PATCH','/api/admin/card-settings',{physical_card_fee_cents:Math.round(Number(data.fee)*100)});notify('Physical card fee saved.');await cardRequests();return;}
   if(type==='adjust'){const id=form.dataset.id;if(!confirm('Post this ledger adjustment?'))return;await api('POST','/api/admin/users/'+id+'/adjust-balance',data);notify('Adjustment posted to the ledger.');S.userId=Number(id);await userDetail();return;}
   if(type==='tx-filter'){S.txQuery=data.q||'';S.txType=data.type||'all';S.txFrom=data.from||'';S.txTo=data.to||'';await transactions();return;}
