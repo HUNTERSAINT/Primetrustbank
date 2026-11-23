@@ -161,6 +161,10 @@ main{padding-top:28px}
 .notification-item .btn:hover{background:#b91c1c;border-color:#fca5a5}
 @media(max-width:600px){.notification-item{padding:11px}.notification-item .tr{align-items:flex-start}}
 
+
+/* Do not render an empty red notification dot when there are no unread items */
+.navbtn .count:empty{display:none!important;padding:0!important;border:0!important;box-shadow:none!important}
+.navbtn .count[hidden]{display:none!important}
 </style></head><body><main>
 <header class="top"><div><div class="brand">Prime Trust <small>/ ADMIN CONSOLE</small></div><div class="muted small" style="margin-top:4px">Customer operations & account oversight</div></div><div class="topright"><span class="pill">Secure administrator session</span><button id="logout" class="btn ghost hidden">Sign out</button></div></header>
 <section id="login" class="panel loginwrap"><h1 style="font:700 30px 'Space Grotesk';margin:0 0 8px">Administrator sign in</h1><p class="muted" style="line-height:1.6">Sign in to manage customer accounts, identity reviews, transactions and support.</p><form id="loginForm"><label class="field">Admin email<input name="email" type="email" required autocomplete="username"></label><label class="field">Password<input name="password" type="password" required autocomplete="current-password"></label><div class="error" id="loginErr"></div><button class="btn primary">Sign in securely</button></form></section>
