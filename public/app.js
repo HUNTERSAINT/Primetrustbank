@@ -25,7 +25,7 @@
   var goalData = null; try { goalData = JSON.parse(localStorage.getItem('ptb_goal') || 'null'); } catch (_) {}
   var resetToken = new URLSearchParams(window.location.search).get('reset') || '';
   var mfaChallengeId = '';
-  var S = { me: null, pendingEmail: '', txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, selectedTx: null, statementFrom: '', statementTo: '', transferDraft: null, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], externalTransfers: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], sessions: [], impersonation: { active: false }, cardReveal: null };
+  var S = { me: null, pendingEmail: '', txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, selectedTx: null, statementFrom: '', statementTo: '', transferDraft: null, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], externalTransfers: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], sessions: [], impersonation: { active: false }, cardReveal: null, cryptoConfig: {enabled:0}, cryptoRequests: [] };
 
   // ---------- api ----------
   function api(method, url, body, idem) {
@@ -40,8 +40,8 @@
       });
   }
   function load() {
-    return Promise.all([api('GET', '/api/me'), api('GET', '/api/transactions?limit=50'), api('GET', '/api/beneficiaries'), api('GET', '/api/impersonation/status'), api('GET','/api/notifications'), api('GET','/api/transfers/scheduled'), api('GET','/api/disputes'), api('GET','/api/account/limits'), api('GET','/api/beneficiaries/saved'), api('GET','/api/external-transfers')])
-      .then(function (r) { S.me = r[0]; S.txs = r[1].transactions; S.benes = r[2].beneficiaries; S.impersonation = r[3] || {active:false}; S.notifications=r[4].notifications||[]; S.scheduled=r[5].transfers||[]; S.disputes=r[6].disputes||[]; S.limits=r[7].limits||S.limits; S.limits.transfer_used=r[7].transfer_used||0; S.savedBenes=r[8].beneficiaries||[]; S.externalTransfers=r[9].transfers||[]; });
+    return Promise.all([api('GET', '/api/me'), api('GET', '/api/transactions?limit=50'), api('GET', '/api/beneficiaries'), api('GET', '/api/impersonation/status'), api('GET','/api/notifications'), api('GET','/api/transfers/scheduled'), api('GET','/api/disputes'), api('GET','/api/account/limits'), api('GET','/api/beneficiaries/saved'), api('GET','/api/external-transfers'), api('GET','/api/crypto-deposit/config'), api('GET','/api/crypto-deposit/requests')])
+      .then(function (r) { S.me = r[0]; S.txs = r[1].transactions; S.benes = r[2].beneficiaries; S.impersonation = r[3] || {active:false}; S.notifications=r[4].notifications||[]; S.scheduled=r[5].transfers||[]; S.disputes=r[6].disputes||[]; S.limits=r[7].limits||S.limits; S.limits.transfer_used=r[7].transfer_used||0; S.savedBenes=r[8].beneficiaries||[]; S.externalTransfers=r[9].transfers||[]; S.cryptoConfig=r[10]||{enabled:0}; S.cryptoRequests=r[11].requests||[]; });
   }
   var tt;
   function toast(m) {
@@ -351,10 +351,11 @@
       '<p class="err" role="alert"></p><button class="pillbtn w" type="submit">Pay bill</button></form>');
   }
   function sFund() {
-    return sheetWrap('Add funds',
-      '<div class="panel" style="padding:14px"><h4 style="margin:0 0 8px">Deposits are not available yet</h4>' +
-      '<p class="lead">External bank and cryptocurrency deposits are not enabled for this account.</p>' +
-      '<p class="hint">Your Prime Trust account number is an internal app identifier, not an external bank receiving account. Do not send money to it.</p></div>');
+    var w=S.cryptoConfig||{}, requests=S.cryptoRequests||[];
+    if(!w.enabled||!w.wallet_address) return sheetWrap('Add funds','<div class="panel" style="padding:14px"><h4 style="margin:0 0 8px">Crypto deposits are unavailable</h4><p class="lead">No cryptocurrency receiving wallet has been enabled by the administrator.</p><p class="hint">Your Prime Trust account number is an internal app identifier, not an external bank receiving account. Do not send money to it.</p></div>');
+    var history=requests.length?'<div class="section"><h4>Recent crypto deposit requests</h4>'+requests.slice(0,5).map(function(r){return '<div class="kv"><span>'+esc(r.amount_crypto)+' '+esc(r.asset)+'</span><b>'+esc(r.status)+'</b></div>';}).join('')+'</div>':'';
+    return sheetWrap('Crypto deposit','<div class="panel" style="padding:14px"><p class="hint">Send only '+esc(w.asset)+' on '+esc(w.network)+' to this wallet. Sending another asset or network may permanently lose your funds.</p><div class="kv"><span>Asset</span><b>'+esc(w.asset)+'</b></div><div class="kv"><span>Network</span><b>'+esc(w.network)+'</b></div><label class="field">Wallet address<textarea readonly rows="3" style="overflow-wrap:anywhere">'+esc(w.wallet_address)+'</textarea></label>'+(w.instructions?'<p class="hint">'+esc(w.instructions)+'</p>':'')+'<p class="hint">After sending, submit the amount and transaction hash below. Requests are reviewed manually. A submitted hash is not a balance credit.</p></div>'+
+      '<form class="form section" data-form="crypto-deposit-request"><label class="field">Amount ('+esc(w.asset)+')<input name="amount_crypto" type="number" inputmode="decimal" min="0.00000001" step="any" required placeholder="0.00"></label><label class="field">Transaction hash / ID<input name="transaction_hash" required minlength="16" maxlength="200" autocomplete="off" placeholder="Paste the on-chain transaction hash"></label><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Submit for review</button></form>'+history);
   }
   function sGoal() {
     var g=S.goal||{name:'',target:'',saved:''};
@@ -589,6 +590,7 @@
       p=compressIdFile(form.elements.proof_address.files[0]).then(function(img){return api('POST','/api/verification/upgrade',{proof_address:img});});
     }
     else if (kind === 'support') p = api('POST', '/api/support/messages', {message:d.message});
+    else if (kind === 'crypto-deposit-request') p=api('POST','/api/crypto-deposit/requests',{amount_crypto:d.amount_crypto,transaction_hash:d.transaction_hash},S.idem);
 
     else if (kind === 'schedule') {
       var localDate=new Date(d.scheduled_at);
@@ -625,6 +627,7 @@
       if (kind === 'mfa-disable') return load().then(function(){S.sheet=null;S.view='security';render();toast('Multi-factor authentication disabled');});
       if (kind === 'forgot') { S.view='login';render();toast('If your account exists, recovery instructions were sent.');return; }
       if (kind === 'reset') { resetToken='';try{history.replaceState(null,'',location.pathname);}catch(_){} S.view='login';render();toast('Password updated. Sign in with your new password.');return; }
+      if (kind === 'crypto-deposit-request') return done('Crypto deposit request submitted for review; no balance was credited.');
       if (kind === 'external-transfer') return done('External transfer request submitted for administrator processing');
       if (kind === 'support') return api('GET','/api/support/messages').then(function(d){S.support=d;render();toast('Message sent to support');});
       if (kind === 'schedule') return load().then(function(){S.view='scheduled';render();toast('Transfer scheduled');});
