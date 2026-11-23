@@ -394,3 +394,25 @@ body{
 .dock button[aria-current="page"]{color:#150a35}
 .copy,.section-label{color:var(--yellow)}
 .field input:focus,.field select:focus,.field textarea:focus{border-color:rgba(255,198,26,.75);box-shadow:0 0 0 3px rgba(255,198,26,.14)}
+
+
+/* High-visibility deposit information and status tags */
+.deposit-intro{margin:4px 0 16px;padding:14px 15px;border:1px solid rgba(255,198,26,.55);border-left:4px solid #ffc61a;border-radius:12px;background:rgba(255,198,26,.12);color:#fff;font-size:13px;line-height:1.65;font-weight:600}
+.deposit-option{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.075);margin:12px 0 16px}
+.deposit-meta .kv{padding:8px 0;border-bottom:1px solid rgba(255,255,255,.13);font-size:13px}
+.deposit-meta .kv span,.deposit-option .field{color:#e8e5f2;font-weight:600}
+.deposit-meta .kv b{color:#fff;font-size:14px;text-align:right;overflow-wrap:anywhere}
+.deposit-label{display:block;margin-top:14px;color:#fff!important;font-size:13px}
+.deposit-address{display:block;width:100%;margin-top:8px;min-height:82px;padding:13px!important;border:1px solid rgba(255,198,26,.72)!important;border-radius:12px!important;background:#100b25!important;color:#fff!important;font-size:13px!important;font-weight:700!important;line-height:1.6!important;letter-spacing:.02em;overflow-wrap:anywhere;white-space:pre-wrap}
+.deposit-instructions{margin-top:12px;padding:12px;border-radius:10px;background:rgba(255,255,255,.1);color:#fff;font-size:13px;line-height:1.65;overflow-wrap:anywhere}
+.deposit-warning{margin:12px 0;padding:13px;border:1px solid rgba(255,198,26,.65);border-radius:10px;background:rgba(255,198,26,.13);color:#fff;font-size:12px;line-height:1.65;font-weight:700}
+.deposit-history{margin-top:20px}
+.deposit-history-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.12)}
+.deposit-history-row>div{min-width:0;display:grid;gap:4px}
+.deposit-history-row b{color:#fff;font-size:13px}
+.deposit-history-row small{color:#e2deef;font-size:11px}
+.deposit-status{display:inline-flex;flex:0 0 auto;align-items:center;justify-content:center;min-width:84px;padding:7px 11px;border:1px solid currentColor;border-radius:999px;background:#fff;color:#222;font-size:11px;font-weight:800;line-height:1.2;text-align:center;text-transform:uppercase;letter-spacing:.035em}
+.deposit-status.status-pending,.deposit-status.status-submitted{background:#fff1bf;color:#6b4300;border-color:#f5c84b}
+.deposit-status.status-approved,.deposit-status.status-success,.deposit-status.status-completed{background:#d9ffea;color:#075b32;border-color:#51d58d}
+.deposit-status.status-rejected,.deposit-status.status-failed{background:#ffe1e1;color:#8b1515;border-color:#f18a8a}
+@media(max-width:380px){.deposit-history-row{align-items:flex-start}.deposit-status{min-width:76px;padding:6px 8px;font-size:10px}}
