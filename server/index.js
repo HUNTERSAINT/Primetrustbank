@@ -910,7 +910,7 @@ app.get('/api/crypto-deposit/requests',auth,wrap(async(req,res)=>{
 
 app.post('/api/crypto-deposit/requests',auth,requireVerified,moneyLimiter,wrap(async(req,res)=>{
  const b=req.body||{},amount=String(b.amount_crypto||'').trim(),hash=String(b.transaction_hash||'').trim(),walletId=Number(b.wallet_id);
- if(!/^(?:0|[1-9]\\d{0,17})(?:\\.\\d{1,18})?$/.test(amount)||Number(amount)<=0)throw httpErr(400,'Enter a valid crypto amount.');
+ if(!/^(?:0|[1-9]\d{0,17})(?:\.\d{1,18})?$/.test(amount)||Number(amount)<=0)throw httpErr(400,'Enter a valid crypto amount.');
  if(hash.length<16||hash.length>200||!/^[A-Za-z0-9:_-]+$/.test(hash))throw httpErr(400,'Enter a valid transaction hash.');
  if(!Number.isSafeInteger(walletId)||walletId<1)throw httpErr(400,'Choose a crypto deposit option.');
  const w=await db.get('SELECT id,asset,network FROM crypto_deposit_wallets WHERE id=? AND enabled=1',[walletId]);
