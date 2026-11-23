@@ -94,7 +94,7 @@ function mount(app, x) {
       await saveRequest(db, sealKyc, req.user.id, d, t);
       await db.run("UPDATE users SET verification_status='submitted', verification_submitted_at=?, kyc_tier=0 WHERE id=?", [t, req.user.id]);
     });
-    void notifyAdminAction('Identity verification pending review','Customer: '+req.user.full_name+' ('+req.user.email+')\\nVerification request submitted. Please review the identity documents in the administrator portal.');
+    void notifyAdminAction('Identity verification pending review','Customer: '+req.user.full_name+' ('+req.user.email+')\nVerification request submitted. Please review the identity documents in the administrator portal.');
     res.json({ ok: true, verification_status: 'submitted' });
   }));
 
@@ -107,7 +107,7 @@ function mount(app, x) {
     if (row && row.upgrade_status === 'submitted') throw httpErr(409, 'Your proof of address is already waiting for review.');
     const t = now();
     await db.run("UPDATE verification_requests SET proof_address_data=?, upgrade_status='submitted', upgrade_submitted_at=?, upgrade_reviewed_at=NULL, upgrade_note=NULL WHERE user_id=?", [sealKyc(proof), t, req.user.id]);
-    void notifyAdminAction('Proof of address pending review','Customer: '+req.user.full_name+' ('+req.user.email+')\\nThe customer submitted proof of address for verification level upgrade. Please review it in the administrator portal.');
+    void notifyAdminAction('Proof of address pending review','Customer: '+req.user.full_name+' ('+req.user.email+')\nThe customer submitted proof of address for verification level upgrade. Please review it in the administrator portal.');
     res.json({ ok: true, upgrade_status: 'submitted' });
   }));
 
