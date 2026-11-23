@@ -408,6 +408,21 @@ app.get('/api/admin/overview', adminAuth, wrap(async (req, res) => {
   const openChats = (await db.get("SELECT COUNT(*) n FROM support_sessions WHERE status='open'", [])).n;
   res.json({stats:{totalUsers:users.total||0,activeUsers:users.active||0,suspendedUsers:users.suspended||0,pendingKyc:kyc,totalTransactions:tx,totalUserBalances:balances,todayTransactions:todayTx,openChats},recentUsers,recentTransactions:recentTx});
 }));
+app.get('/api/admin/deposit-settings',adminAuth,wrap(async(req,res)=>{
+ const bank=await db.get('SELECT bank_name,account_name,account_number,account_type,currency,instructions FROM deposit_settings WHERE id=1');
+ const wallets=await db.all('SELECT id,name,asset,network,address,qr_url,instructions,active,created_at FROM crypto_wallets ORDER BY id DESC',[]);
+ res.json({bank:bank||{bank_name:'',account_name:'',account_number:'',account_type:'',currency:'USD',instructions:''},wallets});
+}));
+app.patch('/api/admin/deposit-settings',adminAuth,wrap(async(req,res)=>{
+ const b=req.body||{};
+ const fields=['bank_name','account_name','account_number','account_type','currency','instructions'];
+ const values=fields.map(k=>String(b[k]||'').trim());
+ values[0]=values[0].slice(0,120);values[1]=values[1].slice(0,120);values[2]=values[2].slice(0,80);values[3]=values[3].slice(0,40);values[4]=(values[4]||'USD').toUpperCase().slice(0,8);values[5]=values[5].slice(0,1000);
+ if(!values[0]||!values[1]||values[2].length<4||!values[4])throw httpErr(400,'Enter the bank name, account name, account number and currency.');
+ await db.run('INSERT INTO deposit_settings (id,bank_name,account_name,account_number,account_type,currency,instructions,updated_at,updated_by) VALUES (1,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET bank_name=excluded.bank_name,account_name=excluded.account_name,account_number=excluded.account_number,account_type=excluded.account_type,currency=excluded.currency,instructions=excluded.instructions,updated_at=excluded.updated_at,updated_by=excluded.updated_by',[...values,now(),String(req.admin.email||'admin')]);
+ await auditAdmin(req,'DEPOSIT_BANK_DETAILS_UPDATED',null,null,'Admin-managed bank deposit details updated');
+ res.json({ok:true});
+}));
 app.get('/api/admin/card-settings',adminAuth,wrap(async(req,res)=>{
  const s=await db.get('SELECT physical_card_fee_cents FROM card_product_settings WHERE id=1');
  res.json({physical_card_fee_cents:s?s.physical_card_fee_cents:2500});
