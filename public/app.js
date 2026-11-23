@@ -397,8 +397,7 @@
     return c;
   }
   function vTransaction() {
-    var t=S.selectedTx;if(!t)return '<section class="screen"><p class="empty">Transaction not found.</p><button class="pillbtn d" data-act="go" data-v="history">Back to activity</button></section>';
-    var incoming=t.amount>=0, title=t.external?'International transfer':t.type==='transfer_out'?'Transfer sent':t.type==='transfer_in'?'Transfer received':t.type==='external_transfer_pending'?'External transfer request':t.type==='external_transfer_refund'?'External transfer refund':t.type==='deposit'?'Deposit':t.type==='airtime'?'Airtime purchase':'Bill payment';
+    var t=S.selectedTx;if(!t)return '<section class="screen"><p class="empty">Transaction not found.</p><button class="pillbtn d" data-act="go" data-v="history">Back to activity</button></section>';    var incoming=t.amount>=0, title=t.external?'International transfer':t.type==='transfer_out'?'Transfer sent':t.type==='transfer_in'?'Transfer received':t.type==='external_transfer_pending'?'External transfer request':t.type==='external_transfer_refund'?'External transfer refund':t.type==='deposit'?'Deposit':t.type==='airtime'?'Airtime purchase':'Bill payment';
     var receipt=[ 'PRIME TRUST BANK — TRANSACTION RECEIPT','',title,'Amount: '+(incoming?'+':'-')+' USD '+money(Math.abs(t.amount)),'Status: '+esc(t.type==='external_transfer_pending'?'Pending admin processing':t.type==='external_transfer_refund'?'Refunded':(t.status||'Successful')),'Date: '+formatUSDateTime(t.created_at),'Description: '+(t.counterparty||'—'),'Reference: '+(t.reference||t.id||'—'),t.note?'Note: '+t.note:'','Time zone: Eastern Time (America/New_York)','Receipt for your recorded account activity.'];
     return '<section class="screen"><div class="hd"><button class="circ" data-act="go" data-v="history" aria-label="Back">'+ic('back')+'</button><h4>Transaction details</h4><span></span></div>'+
       '<div class="panel receipt-hero"><div class="receipt-mark">'+ic(incoming?'down':'up')+'</div><small>'+esc(title)+'</small><strong class="receipt-amount">'+(incoming?'+':'−')+' USD '+money(Math.abs(t.amount))+'</strong><span class="status-chip">'+esc(t.status||'Successful')+'</span></div>'+
@@ -797,8 +796,7 @@
     if (kind === 'card-request') p=api('POST','/api/card/request',{tier:d.tier,physical:d.physical==='on',pin:d.pin});
     else if (kind === 'mfa-login') p=api('POST','/api/auth/mfa/verify',{challenge_id:mfaChallengeId,code:d.code});
     else if (kind === 'mfa-setup') p=api('POST','/api/security/mfa/confirm',{challenge_id:mfaChallengeId,code:d.code});
-    else if (kind === 'mfa-disable') p=api('POST','/api/security/mfa/disable',{password:d.password,pin:d.pin});
-    if (kind === 'pin-recovery-request') p=api('POST','/api/security/pin-recovery/request',{});
+    else if (kind === 'mfa-disable') p=api('POST','/api/security/mfa/disable',{password:d.password,pin:d.pin});    if (kind === 'pin-recovery-request') p=api('POST','/api/security/pin-recovery/request',{});
     else if (kind === 'pin-recovery-confirm') p=api('POST','/api/security/pin-recovery/confirm',{challenge_id:pinResetChallengeId,code:d.code,pin:d.pin,confirm_pin:d.confirm_pin});
     else if (kind === 'forgot') p=api('POST','/api/auth/password-reset/request',{email:d.email});
     else if (kind === 'reset') {
@@ -852,7 +850,7 @@
       if (kind === 'card-settings') return load().then(function(){S.view='card';render();toast('Card controls updated');});
       if (kind === 'card-pin') return load().then(function(){S.view='card';render();toast('Card PIN saved');});
       if (kind === 'card-replace') return load().then(function(){S.sheet=null;S.view='card';render();toast('Card replaced. Activate it and set a new PIN.');});
-      if (kind === 'mfa-login') { mfaChallengeId=''; return api('GET','/api/me').then(function(me){ S.me=me; S.view=me.verification_status==='approved'?'home':'verification'; render(); toast('Code verified. You are signed in.'); load().then(function(){render();}).catch(function(){}); }).catch(function(e){ S.me=null; S.view='login'; render(); toast('The code was accepted, but we could not confirm your sign-in session. Please sign in again.'); }); }
+      if (kind === 'mfa-login') { mfaChallengeId=''; return api('GET','/api/me').then(function(me){ S.me=me; S.view=me.verification_status==='approved'?'home':'verification'; render(); toast('Code verified. You are signed in.'); window.location.reload(); }).catch(function(e){ S.me=null; S.view='login'; render(); toast('The code was accepted, but we could not confirm your sign-in session. Please sign in again.'); }); }
       if (kind === 'mfa-setup') { mfaChallengeId='';return load().then(function(){S.view='security';render();toast('Multi-factor authentication enabled');}); }
       if (kind === 'mfa-disable') return load().then(function(){S.sheet=null;S.view='security';render();toast('Multi-factor authentication disabled');});
       if (kind === 'pin-recovery-request') { pinResetChallengeId=res.challenge_id;S.view='security';render();toast('Recovery code sent to your verified email');return; }
