@@ -419,6 +419,37 @@ app.patch('/api/admin/card-settings',adminAuth,wrap(async(req,res)=>{
  await auditAdmin(req,'PHYSICAL_CARD_FEE_UPDATED',null,fee,'Physical card fee changed');
  res.json({ok:true,physical_card_fee_cents:fee});
 }));
+
+app.get('/api/admin/crypto-deposit/settings',adminAuth,wrap(async(req,res)=>{
+ const w=await db.get('SELECT enabled,asset,network,wallet_address,instructions FROM crypto_deposit_settings WHERE id=1');
+ res.json(w||{enabled:0,asset:'',network:'',wallet_address:'',instructions:''});
+}));
+app.patch('/api/admin/crypto-deposit/settings',adminAuth,wrap(async(req,res)=>{
+ const b=req.body||{},enabled=b.enabled?1:0,asset=String(b.asset||'').trim().toUpperCase().slice(0,20),network=String(b.network||'').trim().slice(0,80),address=String(b.wallet_address||'').trim().slice(0,200),instructions=String(b.instructions||'').trim().slice(0,1000);
+ if(enabled&&(!asset||!network||address.length<8))throw httpErr(400,'Enter the asset, network and a valid wallet address before enabling deposits.');
+ await db.run('INSERT INTO crypto_deposit_settings (id,enabled,asset,network,wallet_address,instructions,updated_at,updated_by) VALUES (1,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled,asset=excluded.asset,network=excluded.network,wallet_address=excluded.wallet_address,instructions=excluded.instructions,updated_at=excluded.updated_at,updated_by=excluded.updated_by',[enabled,asset,network,address,instructions,now(),String(req.admin.email||'admin')]);
+ await auditAdmin(req,'CRYPTO_DEPOSIT_WALLET_UPDATED',null,null,'Crypto deposit wallet configuration updated; enabled='+enabled);
+ res.json({ok:true,enabled,asset,network,wallet_address:address,instructions});
+}));
+app.get('/api/admin/crypto-deposit/requests',adminAuth,wrap(async(req,res)=>{
+ const status=String(req.query.status||'pending');
+ if(!['pending','verified','rejected','all'].includes(status))throw httpErr(400,'Invalid deposit request status.');
+ const where=status==='all'?'':" WHERE r.status=?";
+ const requests=await db.all("SELECT r.id,r.user_id,r.asset,r.network,r.amount_crypto,r.transaction_hash,r.status,r.admin_note,r.created_at,r.reviewed_at,u.full_name,u.email FROM crypto_deposit_requests r JOIN users u ON u.id=r.user_id"+where+" ORDER BY r.created_at DESC LIMIT 300",status==='all'?[]:[status]);
+ const pending=(await db.get("SELECT COUNT(*) n FROM crypto_deposit_requests WHERE status='pending'",[])).n;
+ res.json({requests,pending});
+}));
+app.patch('/api/admin/crypto-deposit/requests/:id',adminAuth,wrap(async(req,res)=>{
+ const id=Number(req.params.id),status=String((req.body||{}).status||''),note=String((req.body||{}).admin_note||'').trim().slice(0,500);
+ if(!Number.isSafeInteger(id)||id<1||!['verified','rejected'].includes(status))throw httpErr(400,'Invalid deposit review action.');
+ const row=await db.get("SELECT id,user_id,status,amount_crypto,asset,network,transaction_hash FROM crypto_deposit_requests WHERE id=?",[id]);
+ if(!row)throw httpErr(404,'Deposit request not found.');
+ if(row.status!=='pending')throw httpErr(409,'This deposit request has already been reviewed.');
+ await db.run("UPDATE crypto_deposit_requests SET status=?,admin_note=?,reviewed_at=?,reviewed_by=? WHERE id=? AND status='pending'",[status,note||null,now(),String(req.admin.email||'admin'),id]);
+ await auditAdmin(req,'CRYPTO_DEPOSIT_'+status.toUpperCase(),row.user_id,null,'Request #'+id+' '+row.asset+' '+row.amount_crypto+' '+row.network+'; hash='+row.transaction_hash);
+ res.json({ok:true,status,credited:false});
+}));
+
 app.get('/api/admin/card-requests', adminAuth, wrap(async (req,res)=>{
   const status=String(req.query.status||'pending');
   if(status!=='pending')throw httpErr(400,'Only pending card requests can be reviewed here.');
@@ -851,6 +882,27 @@ app.get('/api/me', auth, wrap(async (req, res) => {
     card:card?{last4:card.last4,expiry:card.expiry,frozen:!!card.frozen,activated:!!card.activated,online_enabled:!!card.online_enabled,international_enabled:!!card.international_enabled,daily_limit:card.daily_limit,card_pin_set:!!card.card_pin_hash,tier:card.card_tier||'normal',physical_requested:!!card.physical_requested,physical_status:card.physical_status||'not_requested',revoked:!!card.revoked}:null,
     card_options:{physical_fee_cents:cardProduct?cardProduct.physical_card_fee_cents:2500},
     card_request:cardRequest,sandbox_funding:SANDBOX_FUNDING});
+}));
+
+
+app.get('/api/crypto-deposit/config',auth,wrap(async(req,res)=>{
+ const w=await db.get('SELECT enabled,asset,network,wallet_address,instructions FROM crypto_deposit_settings WHERE id=1');
+ res.json(w||{enabled:0,asset:'',network:'',wallet_address:'',instructions:''});
+}));
+app.get('/api/crypto-deposit/requests',auth,wrap(async(req,res)=>{
+ const requests=await db.all('SELECT id,asset,network,amount_crypto,transaction_hash,status,admin_note,created_at,reviewed_at FROM crypto_deposit_requests WHERE user_id=? ORDER BY id DESC LIMIT 50',[req.user.id]);
+ res.json({requests});
+}));
+app.post('/api/crypto-deposit/requests',auth,requireVerified,moneyLimiter,wrap(async(req,res)=>{
+ const b=req.body||{},amount=String(b.amount_crypto||'').trim(),hash=String(b.transaction_hash||'').trim();
+ if(!/^(?:0|[1-9]\d{0,17})(?:\.\d{1,18})?$/.test(amount)||Number(amount)<=0)throw httpErr(400,'Enter a valid crypto amount.');
+ if(hash.length<16||hash.length>200||!/^[A-Za-z0-9:_-]+$/.test(hash))throw httpErr(400,'Enter a valid transaction hash.');
+ const w=await db.get('SELECT enabled,asset,network,wallet_address FROM crypto_deposit_settings WHERE id=1');
+ if(!w||!w.enabled||!w.asset||!w.network||!w.wallet_address)throw httpErr(503,'Crypto deposits are not currently enabled.');
+ try{
+  const result=await db.run("INSERT INTO crypto_deposit_requests (user_id,asset,network,amount_crypto,transaction_hash,status,created_at) VALUES (?,?,?,?,?,'pending',?)",[req.user.id,w.asset,w.network,amount,hash,now()]);
+  res.status(201).json({ok:true,request_id:result.lastInsertRowid,status:'pending',credited:false});
+ }catch(e){if(String(e.message||'').toLowerCase().includes('unique'))throw httpErr(409,'This transaction hash has already been submitted.');throw e;}
 }));
 
 app.get('/api/transactions', auth, wrap(async (req, res) => {
