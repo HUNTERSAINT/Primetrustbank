@@ -46,6 +46,7 @@ async function renderPage(){
 }
 async function overview(){
  const d=await api('GET','/api/admin/overview'),s=d.stats;
+ const depositQueue=await api('GET','/api/admin/deposit-requests?status=pending');$('#depositRequestCount').textContent=depositQueue.pending||0;
  $('#kycCount').textContent=s.pendingKyc||0;$('#chatCount').textContent=s.openChats||0;
  const recent=(d.recentUsers||[]).map(u=>'<tr data-open="user" data-id="'+u.id+'"><td>'+customer(u)+'</td><td>'+badge(u.status)+'</td><td>'+badge(u.verification_status)+'</td><td>'+money(u.balance)+'</td><td>'+date(u.created_at)+'</td></tr>').join('');
  const tx=(d.recentTransactions||[]).map(t=>'<tr><td>#'+t.id+'<small class="muted" style="display:block;margin-top:3px">'+date(t.created_at)+'</small></td><td>'+esc(t.full_name)+'<small class="muted" style="display:block">'+esc(t.email)+'</small></td><td>'+esc(t.type)+'</td><td>'+money(Math.abs(t.amount))+'</td><td>'+esc(t.counterparty)+'</td></tr>').join('');
