@@ -244,6 +244,16 @@ CREATE TABLE IF NOT EXISTS user_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_user_sessions_user ON user_sessions(user_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS admin_notifications (
+  id BIGSERIAL PRIMARY KEY,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'admin',
+  is_read INTEGER NOT NULL DEFAULT 0,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_admin_notifications_created ON admin_notifications(id DESC);
+
 CREATE TABLE IF NOT EXISTS notifications (
   id         BIGSERIAL PRIMARY KEY,
   user_id    BIGINT NOT NULL REFERENCES users(id),
@@ -317,6 +327,7 @@ ALTER TABLE password_reset_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE pin_reset_challenges ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_sessions         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE admin_notifications   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE disputes              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE saved_beneficiaries   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scheduled_transfers   ENABLE ROW LEVEL SECURITY;
