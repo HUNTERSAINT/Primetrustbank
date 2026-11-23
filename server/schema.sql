@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at BIGINT DEFAULT 1;
+ALTER TABLE users ALTER COLUMN mfa_enabled SET DEFAULT 1;
+UPDATE users SET mfa_enabled=1 WHERE mfa_enabled<>1;
 
 CREATE TABLE IF NOT EXISTS email_verification_codes (
   id         BIGSERIAL PRIMARY KEY,
