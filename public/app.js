@@ -25,6 +25,7 @@
   var goalData = null; try { goalData = JSON.parse(localStorage.getItem('ptb_goal') || 'null'); } catch (_) {}
   var resetToken = new URLSearchParams(window.location.search).get('reset') || '';
   var mfaChallengeId = '';
+  var pinResetChallengeId = '';
   var S = { me: null, pendingEmail: '', txs: [], benes: [], meta: { billers: [], networks: [] }, view: 'welcome', sheet: null, hidden: false, idem: null, busy: false, selectedTx: null, statementFrom: '', statementTo: '', transferDraft: null, goal: goalData, support: { session: null, messages: [] }, notifications: [], scheduled: [], disputes: [], externalTransfers: [], limits: { daily_transfer_limit: 500000, daily_payment_limit: 100000 }, savedBenes: [], sessions: [], impersonation: { active: false }, cardReveal: null, cryptoConfig: {enabled:0}, cryptoRequests: [] };
 
   // ---------- api ----------
@@ -309,6 +310,8 @@
     return '<section class="screen">'+pageHead('Profile & security','Manage your account details')+
       '<div class="panel"><div class="hrow">'+avatar(me.name)+'<div><b>'+esc(me.name)+'</b><small>'+esc(me.email)+'</small></div></div><div class="kv"><span>Account number</span><b>'+esc(me.account.number)+'</b></div><div class="kv"><span>Identity verification</span><b>'+esc(me.verification_status||'pending')+'</b></div></div>'+
       '<div class="sub">Sign-in security</div><div class="panel"><div class="hrow"><div><b>Email two-factor authentication</b><small>Required · a 6-digit email code is sent at every sign-in</small></div><div class="sp"></div><span class="status-chip">On</span></div></div>' +
+      '<div class="sub">Transaction PIN recovery</div><div class="panel"><p class="hint">Forgot your 4-digit transaction PIN? Request a one-time code sent to your verified email address, then choose a new PIN.</p><form class="form" data-form="pin-recovery-request"><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Email me a recovery code</button></form>' +
+      (pinResetChallengeId?'<form class="form" data-form="pin-recovery-confirm" style="margin-top:14px"><label class="field">6-digit email code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required></label><label class="field">New transaction PIN<input name="pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="new-password" required></label><label class="field">Confirm new transaction PIN<input name="confirm_pin" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="new-password" required></label><p class="hint">The code expires in 10 minutes and can only be used once.</p><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Verify code & update PIN</button></form>':'')+'</div>' +
       '<div class="sub">Account controls</div><div class="panel">'+pageLink('profile','user','Personal profile','View your personal and account details')+pageLink('accounts','detail','Account details','View account number and balance')+pageLink('card','detail','Card controls','Freeze or unfreeze your card')+pageLink('verification','user','Identity verification','View or submit identity details')+pageLink('support','headset','Support chat','Message Prime Trust support')+pageLink('services','dots','More banking','Account tools and service requests')+pageLink('sessions','user','Devices & sessions','Review and revoke signed-in devices')+'</div>'+
       '<button class="pillbtn d" style="margin-top:14px" data-act="logout">Log out</button></section>'+dock('profile');
   }
@@ -574,7 +577,7 @@
     else if (kind === 'mfa-login') p=api('POST','/api/auth/mfa/verify',{challenge_id:mfaChallengeId,code:d.code});
     else if (kind === 'mfa-setup') p=api('POST','/api/security/mfa/confirm',{challenge_id:mfaChallengeId,code:d.code});
     else if (kind === 'mfa-disable') p=api('POST','/api/security/mfa/disable',{password:d.password,pin:d.pin});
-    if (kind === 'forgot') p=api('POST','/api/auth/password-reset/request',{email:d.email});
+    if (kind === 'pin-recovery-request') p=api('POST','/api/security/pin-recovery/request',{});\n    else if (kind === 'pin-recovery-confirm') p=api('POST','/api/security/pin-recovery/confirm',{challenge_id:pinResetChallengeId,code:d.code,pin:d.pin,confirm_pin:d.confirm_pin});\n    else if (kind === 'forgot') p=api('POST','/api/auth/password-reset/request',{email:d.email});
     else if (kind === 'reset') {
       if(d.password!==d.confirm){busy(form,false);setErr(form,'Passwords do not match.');return;}
       p=api('POST','/api/auth/password-reset/confirm',{token:resetToken,password:d.password});
@@ -627,7 +630,7 @@
       if (kind === 'mfa-login') { mfaChallengeId='';return load().then(function(){S.view=S.me.verification_status==='approved'?'home':'verification';render();toast('Signed in securely');}); }
       if (kind === 'mfa-setup') { mfaChallengeId='';return load().then(function(){S.view='security';render();toast('Multi-factor authentication enabled');}); }
       if (kind === 'mfa-disable') return load().then(function(){S.sheet=null;S.view='security';render();toast('Multi-factor authentication disabled');});
-      if (kind === 'forgot') { S.view='login';render();toast('If your account exists, recovery instructions were sent.');return; }
+      if (kind === 'pin-recovery-request') { pinResetChallengeId=res.challenge_id;S.view='security';render();toast('Recovery code sent to your verified email');return; }\n      if (kind === 'pin-recovery-confirm') { pinResetChallengeId='';S.view='security';render();toast('Transaction PIN updated successfully');return; }\n      if (kind === 'forgot') { S.view='login';render();toast('If your account exists, recovery instructions were sent.');return; }
       if (kind === 'reset') { resetToken='';try{history.replaceState(null,'',location.pathname);}catch(_){} S.view='login';render();toast('Password updated. Sign in with your new password.');return; }
       if (kind === 'crypto-deposit-request') return done('Crypto deposit request submitted for review; no balance was credited.');
       if (kind === 'external-transfer') return done('External transfer request submitted for administrator processing');
