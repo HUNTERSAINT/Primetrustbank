@@ -360,9 +360,9 @@
       (walletCards||'<div class="panel" style="padding:12px;margin:10px 0"><b>No crypto wallets configured</b><p class="hint">The administrator has not added a receiving wallet yet.</p></div>')+
       '<form class="form" data-form="deposit-request"><label class="field">Deposit method<select name="method" required><option value="bank">Bank transfer</option><option value="crypto">Cryptocurrency</option></select></label>'+
       '<label class="field" data-wallet-field hidden>Crypto wallet<select name="wallet_id">'+wallets.map(function(w){return '<option value="'+esc(w.id)+'">'+esc(w.asset+' · '+w.network+' · '+w.name)+'</option>';}).join('')+'</select></label>'+
-      '<label class="field">Amount (USD)<input name="amount" type="number" min="0.01" max="1000000" step="0.01" required placeholder="0.00"></label>'+
+      '<label class="field">Amount (USD equivalent)<input name="amount" type="number" min="0.01" max="1000000" step="0.01" required placeholder="0.00"></label>'+
       '<label class="field"><span data-reference-label>Bank transfer reference</span><input name="reference" required minlength="4" maxlength="200" placeholder="Reference from your bank transfer"></label>'+
-      '<p class="hint">Submit only after you have sent the funds. Do not send crypto on a different network than the wallet shown above.</p><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Submit deposit for review</button></form>'+
+      '<p class="hint">Enter the USD equivalent you expect to receive. Submit only after sending funds; use the exact network shown for crypto.</p><p class="err" role="alert"></p><button class="pillbtn w" type="submit">Submit deposit for review</button></form>'+
       '<div class="sub" style="margin-top:18px">Recent deposit requests</div>'+(requestRows||'<p class="empty">No deposit requests yet.</p>'));
   }
   function sGoal() {
