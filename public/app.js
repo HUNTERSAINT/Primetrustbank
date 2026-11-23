@@ -577,7 +577,9 @@
     else if (kind === 'mfa-login') p=api('POST','/api/auth/mfa/verify',{challenge_id:mfaChallengeId,code:d.code});
     else if (kind === 'mfa-setup') p=api('POST','/api/security/mfa/confirm',{challenge_id:mfaChallengeId,code:d.code});
     else if (kind === 'mfa-disable') p=api('POST','/api/security/mfa/disable',{password:d.password,pin:d.pin});
-    if (kind === 'pin-recovery-request') p=api('POST','/api/security/pin-recovery/request',{});\n    else if (kind === 'pin-recovery-confirm') p=api('POST','/api/security/pin-recovery/confirm',{challenge_id:pinResetChallengeId,code:d.code,pin:d.pin,confirm_pin:d.confirm_pin});\n    else if (kind === 'forgot') p=api('POST','/api/auth/password-reset/request',{email:d.email});
+    if (kind === 'pin-recovery-request') p=api('POST','/api/security/pin-recovery/request',{});
+    else if (kind === 'pin-recovery-confirm') p=api('POST','/api/security/pin-recovery/confirm',{challenge_id:pinResetChallengeId,code:d.code,pin:d.pin,confirm_pin:d.confirm_pin});
+    else if (kind === 'forgot') p=api('POST','/api/auth/password-reset/request',{email:d.email});
     else if (kind === 'reset') {
       if(d.password!==d.confirm){busy(form,false);setErr(form,'Passwords do not match.');return;}
       p=api('POST','/api/auth/password-reset/confirm',{token:resetToken,password:d.password});
@@ -630,7 +632,9 @@
       if (kind === 'mfa-login') { mfaChallengeId='';return load().then(function(){S.view=S.me.verification_status==='approved'?'home':'verification';render();toast('Signed in securely');}); }
       if (kind === 'mfa-setup') { mfaChallengeId='';return load().then(function(){S.view='security';render();toast('Multi-factor authentication enabled');}); }
       if (kind === 'mfa-disable') return load().then(function(){S.sheet=null;S.view='security';render();toast('Multi-factor authentication disabled');});
-      if (kind === 'pin-recovery-request') { pinResetChallengeId=res.challenge_id;S.view='security';render();toast('Recovery code sent to your verified email');return; }\n      if (kind === 'pin-recovery-confirm') { pinResetChallengeId='';S.view='security';render();toast('Transaction PIN updated successfully');return; }\n      if (kind === 'forgot') { S.view='login';render();toast('If your account exists, recovery instructions were sent.');return; }
+      if (kind === 'pin-recovery-request') { pinResetChallengeId=res.challenge_id;S.view='security';render();toast('Recovery code sent to your verified email');return; }
+      if (kind === 'pin-recovery-confirm') { pinResetChallengeId='';S.view='security';render();toast('Transaction PIN updated successfully');return; }
+      if (kind === 'forgot') { S.view='login';render();toast('If your account exists, recovery instructions were sent.');return; }
       if (kind === 'reset') { resetToken='';try{history.replaceState(null,'',location.pathname);}catch(_){} S.view='login';render();toast('Password updated. Sign in with your new password.');return; }
       if (kind === 'crypto-deposit-request') return done('Crypto deposit request submitted for review; no balance was credited.');
       if (kind === 'external-transfer') return done('External transfer request submitted for administrator processing');
