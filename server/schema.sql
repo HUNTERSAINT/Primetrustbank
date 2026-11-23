@@ -330,3 +330,37 @@ ALTER TABLE card_requests ADD COLUMN IF NOT EXISTS card_tier TEXT NOT NULL DEFAU
 ALTER TABLE card_requests ADD COLUMN IF NOT EXISTS physical_requested INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE card_requests ADD COLUMN IF NOT EXISTS physical_fee_cents BIGINT NOT NULL DEFAULT 0;
 INSERT INTO accounts (user_id, account_number, kind, balance) VALUES (NULL, 'SYS-CARD-FEES', 'system', 0) ON CONFLICT (account_number) DO NOTHING;
+
+
+-- Admin-configured crypto deposit wallet and customer proof-of-transfer requests.
+CREATE TABLE IF NOT EXISTS crypto_deposit_settings (
+  id INTEGER PRIMARY KEY CHECK (id=1),
+  enabled INTEGER NOT NULL DEFAULT 0,
+  asset TEXT NOT NULL DEFAULT '',
+  network TEXT NOT NULL DEFAULT '',
+  wallet_address TEXT NOT NULL DEFAULT '',
+  instructions TEXT NOT NULL DEFAULT '',
+  updated_at BIGINT NOT NULL DEFAULT 0,
+  updated_by TEXT
+);
+INSERT INTO crypto_deposit_settings (id,enabled,asset,network,wallet_address,instructions)
+VALUES (1,0,'','','','') ON CONFLICT(id) DO NOTHING;
+ALTER TABLE crypto_deposit_settings ENABLE ROW LEVEL SECURITY;
+
+CREATE TABLE IF NOT EXISTS crypto_deposit_requests (
+  id BIGSERIAL PRIMARY KEY,
+  user_id BIGINT NOT NULL REFERENCES users(id),
+  asset TEXT NOT NULL,
+  network TEXT NOT NULL,
+  amount_crypto TEXT NOT NULL,
+  transaction_hash TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','verified','rejected')),
+  admin_note TEXT,
+  created_at BIGINT NOT NULL,
+  reviewed_at BIGINT,
+  reviewed_by TEXT,
+  UNIQUE(network, transaction_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_crypto_deposit_user ON crypto_deposit_requests(user_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_crypto_deposit_status ON crypto_deposit_requests(status, created_at DESC);
+ALTER TABLE crypto_deposit_requests ENABLE ROW LEVEL SECURITY;
