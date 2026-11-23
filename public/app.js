@@ -622,6 +622,8 @@
     else if (kind === 'bills') p = api('POST', '/api/bills', { biller: d.biller, reference: d.reference, amount: d.amount, pin: d.pin }, S.idem);
     else return;
     p.then(function (res) {
+      if (kind === 'forgot') { busy(form,false); form.innerHTML='<h2>Check your email</h2><p class="lead">If an account exists for that email, password recovery instructions have been sent. Check your inbox and spam folder.</p><button type="button" class="pillbtn w" data-act="go" data-v="login">Back to login</button>'; return; }
+      if (kind === 'reset') { resetToken=''; try { window.history.replaceState({},document.title,window.location.pathname+window.location.hash); } catch (_) {} S.view='login'; render(); toast('Password updated. Please sign in with your new password.'); return; }
       if (kind === 'login' && res.mfa_required) { mfaChallengeId=res.challenge_id;S.view='mfa-login';render();toast('Check your email for the sign-in code');return; }
       if (kind === 'register' && res.email_verification_required) { S.pendingEmail=res.email||d.email;S.view='email-verify';render();toast('Check your email for the verification code');return; }
       if (kind === 'email-verify') return load().then(function(){S.pendingEmail='';S.view='verification';render();toast('Email verified. Continue with identity verification.');});
