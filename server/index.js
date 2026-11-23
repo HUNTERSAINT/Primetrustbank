@@ -121,16 +121,16 @@ app.post('/api/webhooks/resend/inbound-support',wrap(async(req,res)=>{
   const event=req.body||{},type=String(event.type||''),data=event.data||{};
   if(!['email.received','inbox.email.received'].includes(type))return res.status(200).json({ok:true,ignored:true});
   const emailId=String(data.email_id||data.emailId||'');
-  let email=data;
-  if(emailId&&(!data.text&&!data.html&&!data.body)){
+  let email=type==='inbox.email.received'?(data.email||data):data;
+  if(emailId&&(!email.text&&!email.html&&!email.body)){
     const apiKey=process.env.RESEND_API_KEY;if(!apiKey)return fail(res,503,'Email receiving is not configured.');
     const endpoint=type==='email.received'?'https://api.resend.com/emails/receiving/'+encodeURIComponent(emailId):'https://api.resend.com/inboxes/'+encodeURIComponent(data.inbox_id||data.inboxId||'')+'/threads/'+encodeURIComponent(data.thread_id||data.threadId||'')+'/emails/'+encodeURIComponent(emailId);
     const response=await fetch(endpoint,{headers:{Authorization:'Bearer '+apiKey}});
     if(!response.ok)throw httpErr(502,'Could not retrieve the received support email.');
-    email=await response.json();
+    const received=await response.json();email=received.data||received;
   }
   const from=email.from||data.from||'', sender=emailAddress(from);
-  const to=Array.isArray(email.to)?email.to.join(','):String(email.to||data.to||'');
+  const to=Array.isArray(email.to)?email.to.join(','):String(email.to||data.to||((data.inbox_id||data.inboxId)===process.env.RESEND_SUPPORT_INBOX_ID?'support@primetrustdigital.org':''));
   if(!sender||!to.toLowerCase().includes('support@primetrustdigital.org'))return res.status(200).json({ok:true,ignored:true});
   const headers=email.headers||data.headers||{}, header=(name)=>{if(Array.isArray(headers)){const h=headers.find(x=>String(x.name||x.key||'').toLowerCase()===name.toLowerCase());return h?String(h.value||''):'';}return String(headers[name]||headers[name.toLowerCase()]||'');};
   const messageId=header('message-id')||header('Message-ID')||String(email.message_id||data.message_id||'');
