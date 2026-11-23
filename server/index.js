@@ -43,6 +43,18 @@ async function sendTransactionalEmail(to,subject,textBody,htmlBody){
   const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({from,reply_to:[replyTo],to:[to],subject,text:textBody,html:htmlBody})});
   if(!response.ok)throw httpErr(502,'Could not send the security email. Try again later.');
 }
+function emailHtmlEscape(value){
+ return String(value==null?'':value).replace(/[&<>"']/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];});
+}
+async function notifyAdminAction(action,details){
+ const recipient=String(process.env.ADMIN_EMAIL||'teringelff@gmail.com').trim().toLowerCase();
+ const subject='Prime Trust admin action required: '+String(action||'Review request').slice(0,120);
+ const detailText=String(details||'A customer action requires administrator review.').slice(0,2500);
+ const textBody=subject+'\\n\\n'+detailText+'\\n\\nPlease sign in to the Prime Trust administrator portal to review this request.';
+ const htmlBody='<div style="font-family:Arial,sans-serif;line-height:1.6;color:#17212b"><h2>'+emailHtmlEscape(subject)+'</h2><p>'+emailHtmlEscape(detailText).replace(/\\n/g,'<br>')+'</p><p>Please sign in to the Prime Trust administrator portal to review this request.</p></div>';
+ try{await sendTransactionalEmail(recipient,subject,textBody,htmlBody);}
+ catch(error){console.error('Admin action email notification failed:',error&&error.message?error.message:'unknown email error');}
+}
 const DUMMY_HASH = bcrypt.hashSync('not-a-real-password', 10);
 
 const app = express();
@@ -727,6 +739,7 @@ app.post('/api/support/messages', auth, sensitiveWriteLimiter, wrap(async (req,r
   if(!session){const id=(await db.run("INSERT INTO support_sessions (user_id,status,created_at,updated_at) VALUES (?,'open',?,?)", [req.user.id,t,t])).lastInsertRowid;session=(await db.get('SELECT * FROM support_sessions WHERE id=?', [id]));}
   (await db.run("INSERT INTO support_messages (session_id,sender_role,sender_name,message,created_at) VALUES (?,'user',?,?,?)", [session.id,req.user.full_name,message,t]));
   (await db.run("UPDATE support_sessions SET status='open',updated_at=? WHERE id=?", [t,session.id]));
+  void notifyAdminAction('New customer support message','Customer: '+req.user.full_name+' ('+req.user.email+')\nSupport session: #'+session.id+'\nA new message was submitted. Please open the support inbox to read and respond.');
   res.status(201).json({ok:true});
 }));
 
@@ -943,6 +956,7 @@ app.post('/api/crypto-deposit/requests',auth,requireVerified,moneyLimiter,wrap(a
  if(!w)throw httpErr(503,'That crypto deposit option is not currently enabled.');
  try{
   const result=await db.run("INSERT INTO crypto_deposit_requests (user_id,wallet_id,asset,network,amount_crypto,transaction_hash,screenshot_data,status,created_at) VALUES (?,?,?,?,?,?,?, 'pending',?)",[req.user.id,w.id,w.asset,w.network,amount,hash,screenshot,now()]);
+  void notifyAdminAction('Crypto deposit pending review','Customer: '+req.user.full_name+' ('+req.user.email+')\nRequest: #'+result.lastInsertRowid+'\nAmount: '+amount+' '+w.asset+'\nNetwork: '+w.network+'\nTransaction hash: '+hash+'\nPlease review the transaction screenshot and verify the hash on-chain before approving.');
   res.status(201).json({ok:true,request_id:result.lastInsertRowid,status:'pending',credited:false});
  }catch(e){if(String(e.message||'').toLowerCase().includes('unique'))throw httpErr(409,'This transaction hash has already been submitted.');throw e;}
 }));
@@ -1044,6 +1058,7 @@ app.post('/api/external-transfers', auth, requireVerified, moneyLimiter, wrap(as
       const t=now(),insert=await db.run("INSERT INTO external_transfer_requests (user_id,from_account_id,bank_name,account_name,account_number,amount,status,note,created_at,updated_at,hold_group_id) VALUES (?,?,?,?,?,?,'pending',?,?,?,?)",[req.user.id,from.id,bank,name,'••••'+acct.slice(-4),amount,encrypted,t,t,movement.group_id]);
       return {id:insert.lastInsertRowid,balance:movement.balance};
     });
+    void notifyAdminAction('External bank transfer pending review','Customer: '+req.user.full_name+' ('+req.user.email+')\nRequest: #'+result.id+'\nAmount: USD '+(amount/100).toFixed(2)+'\nTransfer type: '+method+'\nBank: '+bank+'\nBeneficiary: '+name+'\nAccount ending: '+acct.slice(-4)+'\nFunds are held pending administrator processing.');
     return {ok:true,request_id:result.id,status:'pending',balance:result.balance};
   });
 }));
@@ -1109,6 +1124,7 @@ app.post('/api/card/request',auth,requireVerified,sensitiveWriteLimiter,wrap(asy
   if(physical&&fee>0){const from=await getUserAccount(req.user.id),to=await db.get("SELECT * FROM accounts WHERE account_number='SYS-CARD-FEES' AND kind='system'");if(!from||!to)throw httpErr(500,'Physical card fee processing is unavailable.');await move({from,to,amount:fee,typeOut:'physical_card_fee',typeIn:'physical_card_fee_received',counterOut:'Physical card request fee',counterIn:'Card fee account',note:'Physical '+tier+' card request fee'});}
   await db.run("INSERT INTO card_requests (user_id,status,card_tier,physical_requested,physical_fee_cents,requested_at) VALUES (?,'pending',?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET status='pending',card_tier=excluded.card_tier,physical_requested=excluded.physical_requested,physical_fee_cents=excluded.physical_fee_cents,requested_at=excluded.requested_at,reviewed_at=NULL,reviewed_by=NULL",[req.user.id,tier,physical?1:0,fee,now()]);
  });
+ void notifyAdminAction('Card request pending review','Customer: '+req.user.full_name+' ('+req.user.email+')\nCard tier: '+tier+'\nCard type: '+(physical?'Physical':'Digital')+'\nRequest status: pending'+(physical?'\nPhysical card fee: USD '+(fee/100).toFixed(2):''));
  await notifyUser(req.user.id,'Card request received','Your '+tier+' card request is awaiting administrator review'+(physical?'. Physical card fee: USD '+(fee/100).toFixed(2):' (digital card).'),'card');
  res.status(201).json({ok:true,status:'pending',tier,physical,physical_fee_cents:fee});
 }));
@@ -1300,6 +1316,7 @@ app.post('/api/disputes',auth,requireVerified,sensitiveWriteLimiter,wrap(async (
   if(!tx)throw httpErr(404,'Transaction not found on your account.');
   try{(await db.run("INSERT INTO disputes (user_id,transaction_id,reason,details,created_at,updated_at) VALUES (?,?,?,?,?,?)", [req.user.id,txId,reason,details,now(),now()]));}
   catch(e){if(e.code==='23505')throw httpErr(409,'A dispute already exists for this transaction.');throw e;}
+  void notifyAdminAction('Transaction dispute pending review','Customer: '+req.user.full_name+' ('+req.user.email+')\nTransaction: #'+txId+'\nReason: '+reason+'\nDispute details: '+details);
   await notifyUser(req.user.id,'Transaction dispute submitted','Your dispute was submitted for review.','support');
   res.status(201).json({ok:true});
 }));
