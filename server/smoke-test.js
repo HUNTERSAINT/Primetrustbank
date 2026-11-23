@@ -8,11 +8,15 @@ process.env.ADMIN_PASSWORD = 'test-admin-password';
 process.env.RESEND_API_KEY = 'test-resend-key';
 process.env.RESEND_FROM_EMAIL = 'Prime Trust <mail@primetrustdigital.org>';
 process.env.RESEND_REPLY_TO = 'reply@primetrustdigital.org';
+const webhookKey = Buffer.from('support-webhook-test-secret-32-bytes').toString('base64');
+process.env.RESEND_WEBHOOK_SECRET = 'whsec_' + webhookKey;
+const sentEmails = [];
 const emailCodes = Object.create(null);
 const realFetch = global.fetch;
 global.fetch = async (url, options) => {
   if (String(url).startsWith('https://api.resend.com/emails')) {
     const payload = JSON.parse(options.body || '{}');
+    sentEmails.push(payload);
     const text = String(payload.text || '');
     const match = text.match(/(?:code is|code:)\s*(\d{6})/i);
     if (match && Array.isArray(payload.to) && payload.to[0]) emailCodes[String(payload.to[0]).toLowerCase()] = match[1];
@@ -21,6 +25,7 @@ global.fetch = async (url, options) => {
   return realFetch(url, options);
 };
 const assert = require('assert');
+const crypto = require('crypto');
 const app = require('./index');
 
 const server = app.listen(0);
@@ -62,6 +67,20 @@ function client() {
   assert.equal(r.status, 200, 'verify a email before KYC');
   r = await b('POST', '/api/auth/email-verification/confirm', { email:'tolu@example.com', code:emailCodes['tolu@example.com'] });
   assert.equal(r.status, 200, 'verify b email before KYC');
+
+  async function inboundSupport(payload, eventId) {
+    const raw=JSON.stringify(payload), timestamp=String(Math.floor(Date.now()/1000));
+    const signature=crypto.createHmac('sha256',Buffer.from(webhookKey,'base64')).update(eventId+'.'+timestamp+'.'+raw).digest('base64');
+    return fetch(base+'/api/webhooks/resend/inbound-support',{method:'POST',headers:{'content-type':'application/json','svix-id':eventId,'svix-timestamp':timestamp,'svix-signature':'v1,'+signature},body:raw});
+  }
+  let inbound=await inboundSupport({type:'email.received',data:{from:'Ada Okafor <ada@example.com>',to:['support@primetrustdigital.org'],subject:'My support request',text:'I need help with my account.',headers:{'message-id':'<ada-support-1@example.com>'}}},'evt-support-1');
+  assert.equal(inbound.status,200,'incoming support email creates website chat');
+  const supportSession=(await require('./db').get('SELECT * FROM support_sessions WHERE user_id=(SELECT id FROM users WHERE email=?)',['ada@example.com']));
+  assert.ok(supportSession,'email support thread attaches to the customer account');
+  assert.equal((await require('./db').get('SELECT COUNT(*) n FROM support_messages WHERE session_id=?',[supportSession.id])).n,1);
+  inbound=await inboundSupport({type:'email.received',data:{from:'Ada Okafor <ada@example.com>',to:['support@primetrustdigital.org'],subject:'Re: [PT Support #'+supportSession.id+'] My support request',text:'Following up from email.',headers:{'message-id':'<ada-support-2@example.com>'}}},'evt-support-2');
+  assert.equal(inbound.status,200,'customer email reply continues the same ticket');
+  assert.equal((await require('./db').get('SELECT COUNT(*) n FROM support_messages WHERE session_id=?',[supportSession.id])).n,2,'email replies are appended to the existing chat');
   // KYC input rules are checked only after email verification.
   const bad = async (patch, why) => { const x = await a('POST', '/api/verification/submit', { ...registrationKycA, ...patch }); assert.equal(x.status, 400, why + ' -> ' + JSON.stringify(x.body)); };
   await bad({ date_of_birth: new Date(Date.now() - 17 * 365.25 * 864e5).toISOString().slice(0, 10) }, 'under 18 rejected');
@@ -79,6 +98,13 @@ function client() {
   assert.equal(r.status, 200, 'submit second identity');
   r = await admin('POST', '/api/admin/login', { email: process.env.ADMIN_EMAIL, password: process.env.ADMIN_PASSWORD });
   assert.equal(r.status, 200, 'administrator login');
+  const supportList=(await admin('GET','/api/admin/chat/sessions')).body.sessions;
+  assert.ok(supportList.some(x=>x.id===supportSession.id&&x.email==='ada@example.com'),'admin sees email-originated chat');
+  r=await admin('POST','/api/admin/chat/sessions/'+supportSession.id+'/reply',{message:'We received your request and are checking it.'});
+  assert.equal(r.status,200,'admin reply is posted to chat');
+  assert.equal(r.body.emailSent,true,'admin reply is also sent by email');
+  assert.ok(sentEmails.some(x=>x.to&&x.to[0]==='ada@example.com'&&String(x.subject).includes('[PT Support #'+supportSession.id+']')&&x.reply_to&&x.reply_to[0]==='support@primetrustdigital.org'),'support reply email carries ticket reference and replies to support');
+  assert.equal((await require('./db').get('SELECT COUNT(*) n FROM support_messages WHERE session_id=?',[supportSession.id])).n,3,'admin reply is recorded in chat');
   const pending = (await admin('GET', '/api/admin/requests')).body.requests;
   assert.equal(pending.length, 2, 'admin sees pending requests');
   const dbForKyc = require('./db');
