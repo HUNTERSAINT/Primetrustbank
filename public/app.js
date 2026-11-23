@@ -301,13 +301,108 @@
       '<div class="panel statement-filter"><label class="field">From<input type="date" data-statement-from value="'+esc(from)+'"></label><label class="field">To<input type="date" data-statement-to value="'+esc(to)+'"></label><button class="pillbtn d" data-act="clear-statement">Clear dates</button></div>'+
       '<label class="field" style="margin:8px 0 14px">Search transactions<input data-search type="search" placeholder="Search activity"></label><p class="hint">'+filtered.length+' transaction'+(filtered.length===1?'':'s')+' in range</p>' + trs + '</section>' + dock('history');
   }
+  var EXT_STATUS = { pending: 'Pending review', processing: 'Processing', completed: 'Completed', rejected: 'Declined, funds returned' };
+  var METHOD_NAME = { international: 'International wire', wire: 'Domestic wire', ach: 'ACH transfer' };
+  function receiptRows(t) {
+    var x = t.external, rows = [];
+    rows.push(['Recipient / sender', t.counterparty || '—']);
+    if (x) {
+      rows.push(['Destination country', x.country || '—']);
+      rows.push(['Beneficiary', x.beneficiary || '—']);
+      rows.push(['Beneficiary bank', x.bank_name || '—']);
+      if (x.bank_country && x.bank_country !== x.country) rows.push(['Bank country', x.bank_country]);
+      rows.push(['Transfer method', METHOD_NAME[x.method] || 'External transfer']);
+      if (x.currency) rows.push(['Destination currency', x.currency]);
+      if (x.account_last4) rows.push(['Account', '•••• ' + x.account_last4]);
+    }
+    rows.push(['Transaction type', LABEL[t.type] || t.type || 'Payment']);
+    rows.push(['Date & time', formatUSDateTime(t.created_at)]);
+    rows.push(['Transaction ID', String(t.reference || t.id || '—')]);
+    if (x) rows.push(['Bank reference code', x.reference || 'Issued when the transfer is completed']);
+    if (x && x.review_note) rows.push(['Reason', x.review_note]);
+    if (t.note && !x) rows.push(['Note', t.note]);
+    return rows;
+  }
+  function receiptStatus(t) {
+    if (t.external) return EXT_STATUS[t.external.status] || t.status || 'Pending review';
+    return t.status || 'Successful';
+  }
+  // Draws the receipt as a PNG image so it looks the same on every phone and prints cleanly.
+  function drawReceipt(t) {
+    var W = 900, pad = 56, S2 = 2, rows = receiptRows(t), x = t.external, incoming = t.amount >= 0;
+    var font = '"Inter","Helvetica Neue",Arial,sans-serif';
+    var meas = document.createElement('canvas').getContext('2d');
+    function wrap(ctx, text, maxW) {
+      var words = String(text).split(/\s+/), lines = [], cur = '';
+      words.forEach(function (w) {
+        var tryLine = cur ? cur + ' ' + w : w;
+        if (ctx.measureText(tryLine).width > maxW && cur) { lines.push(cur); cur = w; } else cur = tryLine;
+      });
+      if (cur) lines.push(cur);
+      return lines.length ? lines : [''];
+    }
+    meas.font = '500 26px ' + font;
+    var valueW = W - pad * 2 - 56 - 270, layout = rows.map(function (r) {
+      var isRef = r[0] === 'Bank reference code' && x && x.reference;
+      meas.font = (isRef ? '700 30px ' : '500 26px ') + font;
+      var lines = wrap(meas, r[1], valueW);
+      return { label: r[0], lines: lines, ref: isRef, h: Math.max(64, lines.length * 36 + 28) };
+    });
+    var bodyH = layout.reduce(function (a, r) { return a + r.h; }, 0);
+    var headH = 330, footH = 190, H = headH + bodyH + footH + 90;
+    var c = document.createElement('canvas'); c.width = W * S2; c.height = H * S2;
+    var g = c.getContext('2d'); g.scale(S2, S2);
+    // backdrop
+    var bg = g.createLinearGradient(0, 0, W, H); bg.addColorStop(0, '#12062f'); bg.addColorStop(1, '#2a0e6b');
+    g.fillStyle = bg; g.fillRect(0, 0, W, H);
+    function rr(x0, y0, w, h, r) { g.beginPath(); g.moveTo(x0 + r, y0); g.arcTo(x0 + w, y0, x0 + w, y0 + h, r); g.arcTo(x0 + w, y0 + h, x0, y0 + h, r); g.arcTo(x0, y0 + h, x0, y0, r); g.arcTo(x0, y0, x0 + w, y0, r); g.closePath(); }
+    var cx = 36, cw = W - 72, cy = 40, ch = H - 80;
+    g.save(); g.shadowColor = 'rgba(0,0,0,.35)'; g.shadowBlur = 40; g.shadowOffsetY = 16; g.fillStyle = '#ffffff'; rr(cx, cy, cw, ch, 34); g.fill(); g.restore();
+    // header band
+    g.save(); rr(cx, cy, cw, headH, 34); g.clip();
+    var hg = g.createLinearGradient(cx, cy, cx + cw, cy + headH); hg.addColorStop(0, '#2a0e6b'); hg.addColorStop(1, '#6a3df0'); g.fillStyle = hg; g.fillRect(cx, cy, cw, headH);
+    g.fillStyle = 'rgba(255,198,26,.18)'; g.beginPath(); g.arc(cx + cw - 40, cy + 30, 150, 0, Math.PI * 2); g.fill();
+    g.restore();
+    g.fillStyle = '#ffc61a'; rr(cx + pad - 10, cy + 40, 52, 52, 14); g.fill();
+    g.fillStyle = '#150a35'; g.font = '800 30px ' + font; g.textAlign = 'center'; g.fillText('P', cx + pad + 16, cy + 77);
+    g.textAlign = 'left'; g.fillStyle = '#fff'; g.font = '700 30px ' + font; g.fillText('Prime Trust Bank', cx + pad + 56, cy + 78);
+    g.fillStyle = 'rgba(255,255,255,.75)'; g.font = '500 22px ' + font;
+    var title = t.type === 'transfer_out' ? 'Transfer sent' : t.type === 'transfer_in' ? 'Transfer received' : t.type === 'external_transfer_pending' ? 'International transfer' : t.type === 'external_transfer_refund' ? 'Transfer refund' : (LABEL[t.type] || 'Payment');
+    if (x && x.method && x.method !== 'international') title = (METHOD_NAME[x.method] || 'External transfer');
+    g.fillText(title.toUpperCase() + ' · RECEIPT', cx + pad - 10, cy + 135);
+    g.fillStyle = '#fff'; g.font = '700 74px ' + font;
+    g.fillText((incoming ? '+ ' : '− ') + 'USD ' + money(Math.abs(t.amount)), cx + pad - 10, cy + 225);
+    // status pill
+    var st = receiptStatus(t), good = !x || x.status === 'completed', bad = x && x.status === 'rejected';
+    g.font = '700 22px ' + font; var pw = g.measureText(st).width + 48;
+    g.fillStyle = bad ? '#ff8a8a' : good ? '#7fe3a4' : '#ffc61a'; rr(cx + pad - 10, cy + 252, pw, 44, 22); g.fill();
+    g.fillStyle = '#150a35'; g.fillText(st, cx + pad + 14, cy + 282);
+    // rows
+    var y = cy + headH + 24;
+    layout.forEach(function (r, i) {
+      if (r.ref) { g.fillStyle = '#fff6d6'; rr(cx + pad - 14, y + 4, cw - (pad - 14) * 2, r.h - 8, 16); g.fill(); g.strokeStyle = '#ffc61a'; g.lineWidth = 2; g.stroke(); }
+      g.fillStyle = '#6b6290'; g.font = '500 23px ' + font; g.textAlign = 'left'; g.fillText(r.label, cx + pad, y + 40);
+      g.fillStyle = '#150a35'; g.font = (r.ref ? '700 30px ' : '500 26px ') + font; g.textAlign = 'right';
+      r.lines.forEach(function (ln, k) { g.fillText(ln, cx + cw - pad, y + 40 + k * 36); });
+      if (!r.ref && i < layout.length - 1) { g.strokeStyle = '#ece8fa'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(cx + pad, y + r.h); g.lineTo(cx + cw - pad, y + r.h); g.stroke(); }
+      y += r.h;
+    });
+    // footer
+    y += 28; g.setLineDash([10, 9]); g.strokeStyle = '#cfc7ee'; g.lineWidth = 2; g.beginPath(); g.moveTo(cx + pad, y); g.lineTo(cx + cw - pad, y); g.stroke(); g.setLineDash([]);
+    g.textAlign = 'left'; g.fillStyle = '#6b6290'; g.font = '500 20px ' + font;
+    g.fillText('Generated ' + formatUSDateTime(Date.now()), cx + pad, y + 46);
+    g.fillText('Times shown in Eastern Time (America/New_York).', cx + pad, y + 78);
+    var note = x ? 'Quote the bank reference code if the receiving bank asks.' : 'This receipt reflects your recorded account activity.';
+    g.fillText(note, cx + pad, y + 110);
+    return c;
+  }
   function vTransaction() {
     var t=S.selectedTx;if(!t)return '<section class="screen"><p class="empty">Transaction not found.</p><button class="pillbtn d" data-act="go" data-v="history">Back to activity</button></section>';
-    var incoming=t.amount>=0, title=t.type==='transfer_out'?'Transfer sent':t.type==='transfer_in'?'Transfer received':t.type==='external_transfer_pending'?'External transfer request':t.type==='external_transfer_refund'?'External transfer refund':t.type==='deposit'?'Deposit':t.type==='airtime'?'Airtime purchase':'Bill payment';
+    var incoming=t.amount>=0, title=t.external?'International transfer':t.type==='transfer_out'?'Transfer sent':t.type==='transfer_in'?'Transfer received':t.type==='external_transfer_pending'?'External transfer request':t.type==='external_transfer_refund'?'External transfer refund':t.type==='deposit'?'Deposit':t.type==='airtime'?'Airtime purchase':'Bill payment';
     var receipt=[ 'PRIME TRUST BANK — TRANSACTION RECEIPT','',title,'Amount: '+(incoming?'+':'-')+' USD '+money(Math.abs(t.amount)),'Status: '+esc(t.type==='external_transfer_pending'?'Pending admin processing':t.type==='external_transfer_refund'?'Refunded':(t.status||'Successful')),'Date: '+formatUSDateTime(t.created_at),'Description: '+(t.counterparty||'—'),'Reference: '+(t.reference||t.id||'—'),t.note?'Note: '+t.note:'','Time zone: Eastern Time (America/New_York)','Receipt for your recorded account activity.'];
     return '<section class="screen"><div class="hd"><button class="circ" data-act="go" data-v="history" aria-label="Back">'+ic('back')+'</button><h4>Transaction details</h4><span></span></div>'+
       '<div class="panel receipt-hero"><div class="receipt-mark">'+ic(incoming?'down':'up')+'</div><small>'+esc(title)+'</small><strong class="receipt-amount">'+(incoming?'+':'−')+' USD '+money(Math.abs(t.amount))+'</strong><span class="status-chip">'+esc(t.status||'Successful')+'</span></div>'+
-      '<div class="panel receipt-details"><div class="kv"><span>Recipient / sender</span><b>'+esc(t.counterparty||'—')+'</b></div><div class="kv"><span>Transaction type</span><b>'+esc(LABEL[t.type]||t.type||'Payment')+'</b></div><div class="kv"><span>Date & time</span><b>'+esc(formatUSDateTime(t.created_at))+'</b></div><div class="kv"><span>Reference</span><b>'+esc(t.reference||t.id||'—')+'</b></div>'+(t.note?'<div class="kv"><span>Note</span><b>'+esc(t.note)+'</b></div>':'')+'</div>'+
+      '<div class="panel receipt-details">'+receiptRows(t).map(function(r){return '<div class="kv"><span>'+esc(r[0])+'</span><b>'+esc(r[1])+'</b></div>';}).join('')+'</div>'+
       '<button class="pillbtn w" style="margin-top:14px" data-act="receipt-download">Download receipt</button><button class="pillbtn d" style="margin-top:10px" data-act="go" data-v="disputes">Report an issue</button></section>'+dock('history');
   }
   function vProfile() {
@@ -616,7 +711,16 @@
     if (a === 'transaction') { S.selectedTx=S.txs.find(function(x){return String(x.id||x.transaction_id||x.reference||'')===String(t.dataset.id);})||null; return go('transaction-detail'); }
     if (a === 'clear-statement') { S.statementFrom='';S.statementTo='';return render(); }
     if (a === 'edit-transfer') { S.sheet='send';return render(S.transferDraft&&S.transferDraft.to_account); }
-    if (a === 'receipt-download') { if(!S.selectedTx)return; var q=S.selectedTx, amount=(q.amount>=0?'+':'-')+' USD '+money(Math.abs(q.amount)); var body='PRIME TRUST BANK\nTRANSACTION RECEIPT\n\nAmount: '+amount+'\nStatus: '+(q.status||'Successful')+'\nDate: '+formatUSDateTime(q.created_at)+'\nTime zone: Eastern Time (America/New_York)\nTime zone: Eastern Time (America/New_York)\nDescription: '+(q.counterparty||'—')+'\nReference: '+(q.reference||q.id||'—')+'\n'+(q.note?'Note: '+q.note+'\n':'')+'\nReceipt generated from your account activity.'; var blob=new Blob([body],{type:'text/plain;charset=utf-8'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='prime-trust-receipt-'+String(q.id||'transaction')+'.txt';link.click();setTimeout(function(){URL.revokeObjectURL(url);},1000);toast('Receipt downloaded');return; }
+    if (a === 'receipt-download') {
+      if(!S.selectedTx)return;
+      var q=S.selectedTx, canvas=drawReceipt(q), fname='prime-trust-receipt-'+String(q.id||'transaction')+'.png';
+      canvas.toBlob(function(blob){
+        if(!blob){toast('Could not create the receipt');return;}
+        var url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=fname;document.body.appendChild(link);link.click();link.remove();
+        setTimeout(function(){URL.revokeObjectURL(url);},4000);toast('Receipt downloaded');
+      },'image/png');
+      return;
+    }
     if (a === 'refresh-support') return go('support');
     if (a === 'return-admin') { if(!confirm('End this customer session and return to the admin console?'))return; api('POST','/api/admin/impersonate-return',{}).then(function(){window.location.href='/api/admin/portal';}).catch(function(e){toast(e.message);}); return; }
     if (a === 'sheet') { if(t.dataset.s==='details')S.cardReveal=null; return openSheet(t.dataset.s); }

@@ -217,6 +217,20 @@ function client() {
   assert.equal((await a('GET', '/api/me')).body.kyc_tier, 2, 'customer is level 2');
   r = await a('POST', '/api/transfers', { to_account: meB.account.number, amount: 1200, pin: '1234' });
   assert.equal(r.status, 200, 'level 2 allows the larger transfer ' + JSON.stringify(r.body));
+  // International transfer: receipt data carries the destination country and the administrator's bank reference.
+  r = await a('POST', '/api/external-transfers', { transfer_type: 'international', bank_name: 'Deutsche Bank', account_name: 'Anna Schmidt', swift_bic: 'DEUTDEFF', iban: 'DE89370400440532013000', bank_address: '1 Taunusanlage, Frankfurt', bank_country: 'Germany', bank_city: 'Frankfurt', intl_recipient_street: '5 Example Str', intl_recipient_city: 'Berlin', intl_recipient_country: 'Germany', destination_currency: 'EUR', transfer_purpose: 'Family support', recipient_relationship: 'Family', source_of_funds: 'Salary', charge_bearer: 'SHA', amount: 150, pin: '1234' }, { 'Idempotency-Key': 'intl-key-123456789' });
+  assert.equal(r.status, 200, 'international transfer accepted ' + JSON.stringify(r.body));
+  const intlId = r.body.request_id;
+  let intlTx = (await a('GET', '/api/transactions?limit=50')).body.transactions.find(x => x.type === 'external_transfer_pending');
+  assert.ok(intlTx && intlTx.external, 'external details attached to the transaction');
+  assert.equal(intlTx.external.country, 'Germany');
+  assert.equal(intlTx.external.status, 'pending');
+  assert.equal(intlTx.external.reference, null, 'no reference before approval');
+  r = await admin('POST', '/api/admin/external-transfers/' + intlId + '/review', { status: 'completed', transfer_reference: 'SWFT-TEST-0001' });
+  assert.equal(r.status, 200, 'admin completes the international transfer ' + JSON.stringify(r.body));
+  intlTx = (await a('GET', '/api/transactions?limit=50')).body.transactions.find(x => x.type === 'external_transfer_pending');
+  assert.equal(intlTx.external.reference, 'SWFT-TEST-0001', 'admin reference reaches the receipt');
+  assert.equal(intlTx.external.status, 'completed');
   // Ledger must balance: all account balances sum to zero across user + system accounts.
   const db = require('./db');
   const sum = (await db.get('SELECT SUM(balance) s FROM accounts')).s;

@@ -1033,10 +1033,34 @@ app.post('/api/crypto-deposit/requests',auth,requireVerified,moneyLimiter,wrap(a
   res.status(201).json({ok:true,request_id:result.lastInsertRowid,status:'pending',credited:false});
  }catch(e){if(String(e.message||'').toLowerCase().includes('unique'))throw httpErr(409,'This transaction hash has already been submitted.');throw e;}
 }));
+// Adds the destination country, status and the administrator's bank reference to external-transfer rows.
+async function attachExternal(rows) {
+  const out = rows.map(shapeTx);
+  const groups = rows.filter((r) => r.type === 'external_transfer_pending').map((r) => r.group_id);
+  if (!groups.length) return out;
+  const found = await db.all('SELECT * FROM external_transfer_requests WHERE hold_group_id IN (' + groups.map(() => '?').join(',') + ')', groups);
+  const byGroup = new Map(found.map((x) => [x.hold_group_id, x]));
+  rows.forEach((r, i) => {
+    const x = byGroup.get(r.group_id);
+    if (!x) return;
+    let d = {};
+    const m = /^ptb-transfer-v[23]:/.exec(String(x.note || ''));
+    if (m) { try { d = JSON.parse(unsealKyc(x.note.slice(m[0].length)) || '{}'); } catch { d = {}; } }
+    const addr = d.recipient_address || {};
+    out[i].external = {
+      request_id: x.id, method: d.transfer_type || null, status: x.status,
+      bank_name: x.bank_name, beneficiary: x.account_name, account_last4: String(x.account_number || '').slice(-4),
+      country: addr.country || d.bank_country || null, bank_country: d.bank_country || null,
+      currency: d.destination_currency || null, reference: x.status === 'completed' ? (x.transfer_reference || null) : null,
+      review_note: x.status === 'rejected' ? (x.review_note || null) : null, updated_at: x.updated_at
+    };
+  });
+  return out;
+}
 app.get('/api/transactions', auth, wrap(async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 20, 100);
   const rows = (await db.all('SELECT * FROM transactions WHERE account_id = ? ORDER BY id DESC LIMIT ?', [req.account.id, limit]));
-  res.json({ transactions: rows.map(shapeTx) });
+  res.json({ transactions: await attachExternal(rows) });
 }));
 
 // People you have sent money to (most recent first, unique).

@@ -19,7 +19,7 @@ let driver;
 // Tables whose INSERT should return the generated id as lastInsertRowid.
 const ID_TABLES = new Set(['users', 'accounts', 'cards', 'card_requests', 'transactions', 'verification_requests',
   'admin_audit', 'support_sessions', 'support_messages', 'password_reset_tokens', 'notifications', 'disputes',
-  'saved_beneficiaries', 'scheduled_transfers']);
+  'saved_beneficiaries', 'scheduled_transfers', 'email_verification_codes', 'external_transfer_requests', 'admin_notifications', 'crypto_deposit_requests', 'crypto_deposit_wallets']);
 
 const toNum = (rows) => rows.map((r) => {
   for (const k in r) if (typeof r[k] === 'bigint') r[k] = Number(r[k]);
