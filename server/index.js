@@ -47,7 +47,7 @@ function emailHtmlEscape(value){
  return String(value==null?'':value).replace(/[&<>"']/g,function(c){return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];});
 }
 async function notifyAdminAction(action,details){
- const recipient=String(process.env.ADMIN_ACTION_EMAIL||'teringelff@gmail.com').trim().toLowerCase();
+ const recipient=String(process.env.ADMIN_ACTION_EMAIL||process.env.ADMIN_EMAIL||'teringelff@gmail.com').trim().toLowerCase();
  const subject='Prime Trust admin action required: '+String(action||'Review request').slice(0,120);
  const detailText=String(details||'A customer action requires administrator review.').slice(0,2500);
  const textBody=subject+'\n\n'+detailText+'\n\nPlease sign in to the Prime Trust administrator portal to review this request.';
