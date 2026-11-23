@@ -146,6 +146,21 @@ main{padding-top:28px}
  .navbtn{width:100%;flex:none;justify-content:flex-start}
  .navbtn:hover{transform:translateY(-1px)}
 }
+
+/* High-visibility red notification treatment */
+.navbtn[data-page="notifications"] .count,
+#adminNotificationCount{background:#b91c1c!important;color:#fff!important;border:1px solid #ff7777!important;box-shadow:0 0 0 2px rgba(185,28,28,.16)}
+.notification-item{border:1px solid rgba(239,68,68,.35);border-left:4px solid #ef4444;background:rgba(127,29,29,.16);border-radius:12px;padding:13px 14px;margin:9px 0}
+.notification-item.unread{background:rgba(185,28,28,.22);border-color:rgba(248,113,113,.72);box-shadow:inset 0 0 0 1px rgba(248,113,113,.08)}
+.notification-item.read{border-left-color:#7f1d1d;opacity:.78}
+.notification-item .m b{color:#fff}
+.notification-item .m small{display:block;color:#f3caca;line-height:1.55;margin-top:5px;overflow-wrap:anywhere}
+.notification-item .r{display:flex;align-items:center;gap:8px}
+.notification-item .read-state{color:#fca5a5;font-size:11px;font-weight:700}
+.notification-item .btn{background:#991b1b;border-color:#ef4444;color:#fff}
+.notification-item .btn:hover{background:#b91c1c;border-color:#fca5a5}
+@media(max-width:600px){.notification-item{padding:11px}.notification-item .tr{align-items:flex-start}}
+
 </style></head><body><main>
 <header class="top"><div><div class="brand">Prime Trust <small>/ ADMIN CONSOLE</small></div><div class="muted small" style="margin-top:4px">Customer operations & account oversight</div></div><div class="topright"><span class="pill">Secure administrator session</span><button id="logout" class="btn ghost hidden">Sign out</button></div></header>
 <section id="login" class="panel loginwrap"><h1 style="font:700 30px 'Space Grotesk';margin:0 0 8px">Administrator sign in</h1><p class="muted" style="line-height:1.6">Sign in to manage customer accounts, identity reviews, transactions and support.</p><form id="loginForm"><label class="field">Admin email<input name="email" type="email" required autocomplete="username"></label><label class="field">Password<input name="password" type="password" required autocomplete="current-password"></label><div class="error" id="loginErr"></div><button class="btn primary">Sign in securely</button></form></section>
