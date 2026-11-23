@@ -914,8 +914,8 @@ app.post('/api/security/pin-recovery/request',auth,sensitiveWriteLimiter,wrap(as
 }));
 app.post('/api/security/pin-recovery/confirm',auth,sensitiveWriteLimiter,wrap(async(req,res)=>{
   const b=req.body||{},id=String(b.challenge_id||''),code=String(b.code||''),pin=String(b.pin||''),confirm=String(b.confirm_pin||'');
-  if(!/^[0-9a-f-]{36}$/i.test(id)||!/^\\d{6}$/.test(code))throw httpErr(400,'Enter the 6-digit email verification code.');
-  if(!/^\\d{4}$/.test(pin)||pin!==confirm)throw httpErr(400,'Enter matching new 4-digit PINs.');
+  if(!/^[0-9a-f-]{36}$/i.test(id)||!/^\d{6}$/.test(code))throw httpErr(400,'Enter the 6-digit email verification code.');
+  if(!/^\d{4}$/.test(pin)||pin!==confirm)throw httpErr(400,'Enter matching new 4-digit PINs.');
   const challenge=await db.get('SELECT * FROM pin_reset_challenges WHERE id=? AND user_id=?',[id,req.user.id]);
   if(!challenge||challenge.used_at||challenge.expires_at<=now()||challenge.attempts>=5)throw httpErr(400,'Recovery code is invalid or expired. Request a new code.');
   const expected=crypto.createHash('sha256').update(id+':'+code+':'+JWT_SECRET).digest('hex'),a=Buffer.from(expected),z=Buffer.from(challenge.code_hash);
