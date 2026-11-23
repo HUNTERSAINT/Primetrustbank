@@ -84,7 +84,8 @@ app.use('/api', (req,res,next)=>{ res.set('Cache-Control','no-store, private'); 
 
 // ---------- helpers ----------
 const now = () => Date.now();
-const EASTERN_TZ = 'America/New_York';\nfunction easternDayStart(value) { const date = value instanceof Date ? value : new Date(value); const parts = {}; const formatter = new Intl.DateTimeFormat('en-US',{timeZone:EASTERN_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}); formatter.formatToParts(date).forEach(p=>{if(p.type!=='literal')parts[p.type]=p.value;}); const target = Date.UTC(Number(parts.year),Number(parts.month)-1,Number(parts.day)); let guess=target; for(let i=0;i<3;i++){const p={};formatter.formatToParts(new Date(guess)).forEach(x=>{if(x.type!=='literal')p[x.type]=x.value;}); const represented=Date.UTC(Number(p.year),Number(p.month)-1,Number(p.day),Number(p.hour),Number(p.minute),Number(p.second)); guess=target-(represented-guess);} return guess; }
+const EASTERN_TZ = 'America/New_York';
+function easternDayStart(value) { const date = value instanceof Date ? value : new Date(value); const parts = {}; const formatter = new Intl.DateTimeFormat('en-US',{timeZone:EASTERN_TZ,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}); formatter.formatToParts(date).forEach(p=>{if(p.type!=='literal')parts[p.type]=p.value;}); const target = Date.UTC(Number(parts.year),Number(parts.month)-1,Number(parts.day)); let guess=target; for(let i=0;i<3;i++){const p={};formatter.formatToParts(new Date(guess)).forEach(x=>{if(x.type!=='literal')p[x.type]=x.value;}); const represented=Date.UTC(Number(p.year),Number(p.month)-1,Number(p.day),Number(p.hour),Number(p.minute),Number(p.second)); guess=target-(represented-guess);} return guess; }
 const cents = (v) => {
   // accepts a number or numeric string in major units, returns integer minor units or null
   const n = typeof v === 'string' ? Number(v) : v;
@@ -431,8 +432,8 @@ app.get('/api/admin/overview', adminAuth, wrap(async (req, res) => {
   const kyc = (await db.get("SELECT COUNT(*) n FROM verification_requests WHERE review_status = 'submitted'", [])).n;
   const tx = (await db.get("SELECT COUNT(*) n FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.kind='user'", [])).n;
   const balances = (await db.get("SELECT COALESCE(SUM(balance),0) n FROM accounts WHERE kind='user'", [])).n;
-  const today = new Date(); today.setHours(0,0,0,0);
-  const todayTx = (await db.get("SELECT COUNT(*) n FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.kind='user' AND t.created_at>=?", [today.getTime()])).n;
+  const todayStart = easternDayStart(new Date());
+  const todayTx = (await db.get("SELECT COUNT(*) n FROM transactions t JOIN accounts a ON a.id=t.account_id WHERE a.kind='user' AND t.created_at>=?", [todayStart])).n;
   const recentUsers = (await db.all("SELECT u.id,u.full_name,u.email,u.status,u.verification_status,u.created_at,a.account_number,a.balance FROM users u JOIN accounts a ON a.user_id=u.id AND a.kind='user' ORDER BY u.created_at DESC LIMIT 6", []));
   const recentTx = (await db.all("SELECT t.id,t.type,t.amount,t.balance_after,t.counterparty,t.note,t.created_at,u.full_name,u.email,a.account_number FROM transactions t JOIN accounts a ON a.id=t.account_id JOIN users u ON u.id=a.user_id WHERE a.kind='user' ORDER BY t.id DESC LIMIT 8", []));
   const openChats = (await db.get("SELECT COUNT(*) n FROM support_sessions WHERE status='open'", [])).n;
