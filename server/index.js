@@ -420,16 +420,30 @@ app.patch('/api/admin/card-settings',adminAuth,wrap(async(req,res)=>{
  res.json({ok:true,physical_card_fee_cents:fee});
 }));
 
+
 app.get('/api/admin/crypto-deposit/settings',adminAuth,wrap(async(req,res)=>{
- const w=await db.get('SELECT enabled,asset,network,wallet_address,instructions FROM crypto_deposit_settings WHERE id=1');
- res.json(w||{enabled:0,asset:'',network:'',wallet_address:'',instructions:''});
+ const wallets=await db.all('SELECT id,enabled,asset,network,wallet_address,instructions,created_at,updated_at FROM crypto_deposit_wallets ORDER BY id DESC');
+ res.json({wallets});
 }));
-app.patch('/api/admin/crypto-deposit/settings',adminAuth,wrap(async(req,res)=>{
- const b=req.body||{},enabled=b.enabled?1:0,asset=String(b.asset||'').trim().toUpperCase().slice(0,20),network=String(b.network||'').trim().slice(0,80),address=String(b.wallet_address||'').trim().slice(0,200),instructions=String(b.instructions||'').trim().slice(0,1000);
- if(enabled&&(!asset||!network||address.length<8))throw httpErr(400,'Enter the asset, network and a valid wallet address before enabling deposits.');
- await db.run('INSERT INTO crypto_deposit_settings (id,enabled,asset,network,wallet_address,instructions,updated_at,updated_by) VALUES (1,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET enabled=excluded.enabled,asset=excluded.asset,network=excluded.network,wallet_address=excluded.wallet_address,instructions=excluded.instructions,updated_at=excluded.updated_at,updated_by=excluded.updated_by',[enabled,asset,network,address,instructions,now(),String(req.admin.email||'admin')]);
- await auditAdmin(req,'CRYPTO_DEPOSIT_WALLET_UPDATED',null,null,'Crypto deposit wallet configuration updated; enabled='+enabled);
- res.json({ok:true,enabled,asset,network,wallet_address:address,instructions});
+app.post('/api/admin/crypto-deposit/settings',adminAuth,wrap(async(req,res)=>{
+ const b=req.body||{},enabled=b.enabled===false?0:1,asset=String(b.asset||'').trim().toUpperCase().slice(0,20),network=String(b.network||'').trim().slice(0,80),address=String(b.wallet_address||'').trim().slice(0,200),instructions=String(b.instructions||'').trim().slice(0,1000);
+ if(!asset||!network||address.length<8)throw httpErr(400,'Enter asset, network and a valid wallet address.');
+ const result=await db.run('INSERT INTO crypto_deposit_wallets (enabled,asset,network,wallet_address,instructions,created_at,updated_at,updated_by) VALUES (?,?,?,?,?,?,?,?)',[enabled,asset,network,address,instructions,now(),now(),String(req.admin.email||'admin')]);
+ await auditAdmin(req,'CRYPTO_DEPOSIT_WALLET_CREATED',null,null,'Wallet option #'+result.lastInsertRowid+' '+asset+' '+network);
+ res.status(201).json({ok:true,id:result.lastInsertRowid});
+}));
+app.patch('/api/admin/crypto-deposit/settings/:id',adminAuth,wrap(async(req,res)=>{
+ const id=Number(req.params.id),b=req.body||{},enabled=b.enabled?1:0,asset=String(b.asset||'').trim().toUpperCase().slice(0,20),network=String(b.network||'').trim().slice(0,80),address=String(b.wallet_address||'').trim().slice(0,200),instructions=String(b.instructions||'').trim().slice(0,1000);
+ if(!Number.isSafeInteger(id)||id<1||!asset||!network||address.length<8)throw httpErr(400,'Enter asset, network and a valid wallet address.');
+ const result=await db.run('UPDATE crypto_deposit_wallets SET enabled=?,asset=?,network=?,wallet_address=?,instructions=?,updated_at=?,updated_by=? WHERE id=?',[enabled,asset,network,address,instructions,now(),String(req.admin.email||'admin'),id]);
+ if(!result.changes)throw httpErr(404,'Crypto wallet option not found.');
+ await auditAdmin(req,'CRYPTO_DEPOSIT_WALLET_UPDATED',null,null,'Wallet option #'+id+' updated');
+ res.json({ok:true});
+}));
+app.delete('/api/admin/crypto-deposit/settings/:id',adminAuth,wrap(async(req,res)=>{
+ const id=Number(req.params.id);if(!Number.isSafeInteger(id)||id<1)throw httpErr(400,'Invalid wallet option.');
+ const result=await db.run('DELETE FROM crypto_deposit_wallets WHERE id=?',[id]);if(!result.changes)throw httpErr(404,'Crypto wallet option not found.');
+ await auditAdmin(req,'CRYPTO_DEPOSIT_WALLET_DELETED',null,null,'Wallet option #'+id+' removed');res.json({ok:true});
 }));
 app.get('/api/admin/crypto-deposit/requests',adminAuth,wrap(async(req,res)=>{
  const status=String(req.query.status||'pending');
@@ -886,25 +900,26 @@ app.get('/api/me', auth, wrap(async (req, res) => {
 
 
 app.get('/api/crypto-deposit/config',auth,wrap(async(req,res)=>{
- const w=await db.get('SELECT enabled,asset,network,wallet_address,instructions FROM crypto_deposit_settings WHERE id=1');
- res.json(w||{enabled:0,asset:'',network:'',wallet_address:'',instructions:''});
+ const wallets=await db.all('SELECT id,asset,network,wallet_address,instructions FROM crypto_deposit_wallets WHERE enabled=1 ORDER BY asset,network,id');
+ res.json({wallets});
 }));
 app.get('/api/crypto-deposit/requests',auth,wrap(async(req,res)=>{
  const requests=await db.all('SELECT id,asset,network,amount_crypto,transaction_hash,status,admin_note,created_at,reviewed_at FROM crypto_deposit_requests WHERE user_id=? ORDER BY id DESC LIMIT 50',[req.user.id]);
  res.json({requests});
 }));
+
 app.post('/api/crypto-deposit/requests',auth,requireVerified,moneyLimiter,wrap(async(req,res)=>{
- const b=req.body||{},amount=String(b.amount_crypto||'').trim(),hash=String(b.transaction_hash||'').trim();
- if(!/^(?:0|[1-9]\d{0,17})(?:\.\d{1,18})?$/.test(amount)||Number(amount)<=0)throw httpErr(400,'Enter a valid crypto amount.');
+ const b=req.body||{},amount=String(b.amount_crypto||'').trim(),hash=String(b.transaction_hash||'').trim(),walletId=Number(b.wallet_id);
+ if(!/^(?:0|[1-9]\\d{0,17})(?:\\.\\d{1,18})?$/.test(amount)||Number(amount)<=0)throw httpErr(400,'Enter a valid crypto amount.');
  if(hash.length<16||hash.length>200||!/^[A-Za-z0-9:_-]+$/.test(hash))throw httpErr(400,'Enter a valid transaction hash.');
- const w=await db.get('SELECT enabled,asset,network,wallet_address FROM crypto_deposit_settings WHERE id=1');
- if(!w||!w.enabled||!w.asset||!w.network||!w.wallet_address)throw httpErr(503,'Crypto deposits are not currently enabled.');
+ if(!Number.isSafeInteger(walletId)||walletId<1)throw httpErr(400,'Choose a crypto deposit option.');
+ const w=await db.get('SELECT id,asset,network FROM crypto_deposit_wallets WHERE id=? AND enabled=1',[walletId]);
+ if(!w)throw httpErr(503,'That crypto deposit option is not currently enabled.');
  try{
-  const result=await db.run("INSERT INTO crypto_deposit_requests (user_id,asset,network,amount_crypto,transaction_hash,status,created_at) VALUES (?,?,?,?,?,'pending',?)",[req.user.id,w.asset,w.network,amount,hash,now()]);
+  const result=await db.run("INSERT INTO crypto_deposit_requests (user_id,wallet_id,asset,network,amount_crypto,transaction_hash,status,created_at) VALUES (?,?,?,?,?,?, 'pending',?)",[req.user.id,w.id,w.asset,w.network,amount,hash,now()]);
   res.status(201).json({ok:true,request_id:result.lastInsertRowid,status:'pending',credited:false});
  }catch(e){if(String(e.message||'').toLowerCase().includes('unique'))throw httpErr(409,'This transaction hash has already been submitted.');throw e;}
 }));
-
 app.get('/api/transactions', auth, wrap(async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 20, 100);
   const rows = (await db.all('SELECT * FROM transactions WHERE account_id = ? ORDER BY id DESC LIMIT ?', [req.account.id, limit]));
