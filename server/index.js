@@ -894,6 +894,44 @@ app.post('/api/security/mfa/confirm',auth,sensitiveWriteLimiter,wrap(async (req,
 app.post('/api/security/mfa/disable',auth,sensitiveWriteLimiter,wrap(async (req,res)=>{
   throw httpErr(403,'Email two-factor authentication is required and cannot be disabled.');
 }));
+app.post('/api/security/pin-recovery/request',auth,sensitiveWriteLimiter,wrap(async(req,res)=>{
+  if(!req.user.email_verified_at)throw httpErr(403,'Verify your email address before recovering your transaction PIN.');
+  const recent=await db.get('SELECT created_at FROM pin_reset_challenges WHERE user_id=? ORDER BY created_at DESC LIMIT 1',[req.user.id]);
+  if(recent&&recent.created_at>now()-60*1000)throw httpErr(429,'A recovery code was sent recently. Please wait one minute before requesting another.');
+  const id=crypto.randomUUID(),code=String(crypto.randomInt(0,1000000)).padStart(6,'0'),created=now();
+  const codeHash=crypto.createHash('sha256').update(id+':'+code+':'+JWT_SECRET).digest('hex');
+  await db.tx(async()=>{
+    await db.run('UPDATE pin_reset_challenges SET used_at=? WHERE user_id=? AND used_at IS NULL',[created,req.user.id]);
+    await db.run('INSERT INTO pin_reset_challenges (id,user_id,code_hash,expires_at,created_at) VALUES (?,?,?,?,?)',[id,req.user.id,codeHash,created+10*60*1000,created]);
+  });
+  try{
+    await sendTransactionalEmail(req.user.email,'Prime Trust transaction PIN recovery','Your transaction PIN recovery code is '+code+'. It expires in 10 minutes. If you did not request this, do not share the code and contact support.','<p>A request was made to reset your Prime Trust transaction PIN.</p><p>Your one-time verification code is:</p><h2 style="letter-spacing:6px">'+code+'</h2><p>This code expires in 10 minutes and can be used once. Never share it with anyone, including Prime Trust staff.</p><p>If you did not request this, ignore this email and contact support.</p>');
+  }catch(e){
+    await db.run('UPDATE pin_reset_challenges SET used_at=? WHERE id=?',[now(),id]);
+    throw e;
+  }
+  res.json({ok:true,challenge_id:id,message:'A PIN recovery code has been sent to your verified email address.'});
+}));
+app.post('/api/security/pin-recovery/confirm',auth,sensitiveWriteLimiter,wrap(async(req,res)=>{
+  const b=req.body||{},id=String(b.challenge_id||''),code=String(b.code||''),pin=String(b.pin||''),confirm=String(b.confirm_pin||'');
+  if(!/^[0-9a-f-]{36}$/i.test(id)||!/^\\d{6}$/.test(code))throw httpErr(400,'Enter the 6-digit email verification code.');
+  if(!/^\\d{4}$/.test(pin)||pin!==confirm)throw httpErr(400,'Enter matching new 4-digit PINs.');
+  const challenge=await db.get('SELECT * FROM pin_reset_challenges WHERE id=? AND user_id=?',[id,req.user.id]);
+  if(!challenge||challenge.used_at||challenge.expires_at<=now()||challenge.attempts>=5)throw httpErr(400,'Recovery code is invalid or expired. Request a new code.');
+  const expected=crypto.createHash('sha256').update(id+':'+code+':'+JWT_SECRET).digest('hex'),a=Buffer.from(expected),z=Buffer.from(challenge.code_hash);
+  if(a.length!==z.length||!crypto.timingSafeEqual(a,z)){
+    await db.run('UPDATE pin_reset_challenges SET attempts=attempts+1 WHERE id=?',[id]);
+    throw httpErr(401,'Recovery code is incorrect.');
+  }
+  const t=now(),pinHash=bcrypt.hashSync(pin,12);
+  await db.tx(async()=>{
+    await db.run('UPDATE pin_reset_challenges SET used_at=? WHERE id=?',[t,id]);
+    await db.run('UPDATE pin_reset_challenges SET used_at=? WHERE user_id=? AND used_at IS NULL',[t,req.user.id]);
+    await db.run('UPDATE users SET pin_hash=?,failed_pins=0,pin_locked_until=0 WHERE id=?',[pinHash,req.user.id]);
+  });
+  void notifyUser(req.user.id,'Transaction PIN changed','Your transaction PIN was reset using your verified email. If you did not make this change, contact support immediately.','security');
+  res.json({ok:true,message:'Your transaction PIN has been updated.'});
+}));
 app.post('/api/auth/logout', wrap(async (req, res) => {
   try { const payload=jwt.verify(req.cookies.ptb_session||'',JWT_SECRET); if(payload.jti)(await db.run('UPDATE user_sessions SET revoked_at=? WHERE jti=? AND revoked_at IS NULL', [now(),payload.jti])); } catch {}
   res.clearCookie('ptb_session', { path: '/' }); res.clearCookie('ptb_impersonation',{path:'/'}); res.json({ ok: true });
