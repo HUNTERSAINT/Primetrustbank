@@ -222,6 +222,17 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS pin_reset_challenges (
+  id         TEXT PRIMARY KEY,
+  user_id    BIGINT NOT NULL REFERENCES users(id),
+  code_hash  TEXT NOT NULL,
+  expires_at BIGINT NOT NULL,
+  attempts   INTEGER NOT NULL DEFAULT 0,
+  used_at    BIGINT,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pin_reset_user ON pin_reset_challenges(user_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS user_sessions (
   jti          TEXT PRIMARY KEY,
   user_id      BIGINT NOT NULL REFERENCES users(id),
