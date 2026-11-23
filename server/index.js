@@ -892,12 +892,7 @@ app.post('/api/security/mfa/confirm',auth,sensitiveWriteLimiter,wrap(async (req,
   res.json({ok:true,mfa_enabled:true});
 }));
 app.post('/api/security/mfa/disable',auth,sensitiveWriteLimiter,wrap(async (req,res)=>{
-  const b=req.body||{},password=String(b.password||''),pin=String(b.pin||'');
-  if(!bcrypt.compareSync(password,req.user.password_hash))throw httpErr(401,'Password is incorrect.');
-  await verifyPin(req.user,pin);
-  (await db.run('UPDATE users SET mfa_enabled=0 WHERE id=?', [req.user.id]));
-  (await db.run("UPDATE mfa_challenges SET used_at=? WHERE user_id=? AND used_at IS NULL", [now(),req.user.id]));
-  res.json({ok:true,mfa_enabled:false});
+  throw httpErr(403,'Email two-factor authentication is required and cannot be disabled.');
 }));
 app.post('/api/auth/logout', wrap(async (req, res) => {
   try { const payload=jwt.verify(req.cookies.ptb_session||'',JWT_SECRET); if(payload.jti)(await db.run('UPDATE user_sessions SET revoked_at=? WHERE jti=? AND revoked_at IS NULL', [now(),payload.jti])); } catch {}
