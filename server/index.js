@@ -440,6 +440,39 @@ app.delete('/api/admin/crypto-wallets/:id',adminAuth,wrap(async(req,res)=>{
  const wallet=await db.get('SELECT id,name,asset,network FROM crypto_wallets WHERE id=?',[id]);if(!wallet)throw httpErr(404,'Wallet not found.');
  await db.run('UPDATE crypto_wallets SET active=0,updated_at=? WHERE id=?',[now(),id]);await auditAdmin(req,'CRYPTO_WALLET_DISABLED',null,null,wallet.asset+' '+wallet.network+' wallet disabled');res.json({ok:true});
 }));
+app.get('/api/admin/deposit-requests',adminAuth,wrap(async(req,res)=>{
+ const status=String(req.query.status||'pending');
+ if(!['pending','all','confirmed','rejected'].includes(status))throw httpErr(400,'Invalid deposit request status.');
+ const where=status==='all'?'':"WHERE dr.status=?";
+ const args=status==='all'?[]:[status];
+ const requests=await db.all("SELECT dr.id,dr.user_id,dr.method,dr.amount,dr.currency,dr.depositor_name,dr.reference,dr.wallet_name,dr.wallet_network,dr.wallet_address,dr.status,dr.review_note,dr.created_at,dr.reviewed_at,u.full_name,u.email,a.account_number FROM deposit_requests dr JOIN users u ON u.id=dr.user_id JOIN accounts a ON a.id=dr.account_id "+where+" ORDER BY CASE dr.status WHEN 'pending' THEN 0 ELSE 1 END,dr.created_at DESC LIMIT 300",args);
+ res.json({requests,pending:(await db.get("SELECT COUNT(*) n FROM deposit_requests WHERE status='pending'",[])).n});
+}));
+app.post('/api/admin/deposit-requests/:id/review',adminAuth,wrap(async(req,res)=>{
+ const id=Number(req.params.id),b=req.body||{},decision=String(b.status||''),note=String(b.review_note||'').trim().slice(0,300);
+ if(!Number.isSafeInteger(id)||id<1||!['confirmed','rejected'].includes(decision))throw httpErr(400,'Choose confirm or reject.');
+ if(decision==='rejected'&&note.length<3)throw httpErr(400,'Enter a reason for rejecting this deposit.');
+ if(decision==='confirmed'&&note.length<4)throw httpErr(400,'Add a note confirming the transfer was independently verified.');
+ const result=await db.tx(async()=>{
+  const request=await db.get('SELECT * FROM deposit_requests WHERE id=? FOR UPDATE',[id]);
+  if(!request)throw httpErr(404,'Deposit request not found.');
+  if(request.status!=='pending')throw httpErr(409,'This deposit request has already been reviewed.');
+  if(decision==='rejected'){
+   await db.run('UPDATE deposit_requests SET status=?,review_note=?,reviewed_by=?,reviewed_at=?,updated_at=? WHERE id=?',[decision,note,String(req.admin.email||'admin'),now(),now(),id]);
+   await auditAdmin(req,'DEPOSIT_REQUEST_REJECTED',request.user_id,request.amount,'Deposit request #'+id+': '+note);
+   return {status:decision};
+  }
+  const account=await db.get('SELECT * FROM accounts WHERE id=? FOR UPDATE',[request.account_id]);
+  const sys=await db.get("SELECT * FROM accounts WHERE account_number='SYS-ADMIN-ADJUST' AND kind='system'",[]);
+  if(!account||!sys)throw httpErr(500,'Deposit ledger accounts are unavailable.');
+  await move({from:sys,to:account,amount:request.amount,typeOut:'manual_deposit_out',typeIn:'deposit',counterOut:'Deposit clearing',counterIn:request.method==='bank'?'Bank deposit':'Crypto deposit',note:'Deposit request #'+id+' · '+request.reference});
+  const ledger=await db.get('SELECT id FROM transactions WHERE account_id=? ORDER BY id DESC LIMIT 1',[account.id]);
+  await db.run('UPDATE deposit_requests SET status=?,review_note=?,reviewed_by=?,reviewed_at=?,updated_at=?,ledger_tx_id=? WHERE id=?',[decision,note,String(req.admin.email||'admin'),now(),now(),ledger?ledger.id:null,id]);
+  await auditAdmin(req,'DEPOSIT_REQUEST_CONFIRMED',request.user_id,request.amount,'Deposit request #'+id+' manually verified and credited');
+  return {status:decision,balance:(await db.get('SELECT balance FROM accounts WHERE id=?',[account.id])).balance};
+ });
+ res.json({ok:true,...result});
+}));
 app.get('/api/admin/card-settings',adminAuth,wrap(async(req,res)=>{
  const s=await db.get('SELECT physical_card_fee_cents FROM card_product_settings WHERE id=1');
  res.json({physical_card_fee_cents:s?s.physical_card_fee_cents:2500});
