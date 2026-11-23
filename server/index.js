@@ -78,7 +78,7 @@ app.use(helmet({
   }
 }));
 app.use((req, res, next) => { db.ready.then(() => next(), next); });
-app.use(express.json({ limit: '18mb', strict: true, verify: (req, res, buf) => { req.rawBody = Buffer.from(buf); } }));
+app.use(express.json({ limit: '60mb', strict: true, verify: (req, res, buf) => { req.rawBody = Buffer.from(buf); } }));
 app.use(cookieParser());
 app.use('/api', (req,res,next)=>{ res.set('Cache-Control','no-store, private'); res.set('Pragma','no-cache'); next(); });
 
