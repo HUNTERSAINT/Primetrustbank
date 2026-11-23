@@ -137,7 +137,8 @@
             var reader=new FileReader();
             reader.onload=function(){
               var result=String(reader.result||''),mime='';
-              if(!/^data:image\\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(result)){rejectRaw(new Error(label+': this file is not a supported JPG, PNG or WebP image.'));return;}
+              var comma=result.indexOf(','),header=comma>0?result.slice(0,comma):'',payload=comma>0?result.slice(comma+1):'';
+              if(['data:image/jpeg;base64','data:image/png;base64','data:image/webp;base64'].indexOf(header)<0||!/^[A-Za-z0-9+/]+={0,2}$/.test(payload)){rejectRaw(new Error(label+': this file is not a supported JPG, PNG or WebP image.'));return;}
               if(file.slice && file.slice(0,32).arrayBuffer){
                 file.slice(0,32).arrayBuffer().then(function(buffer){
                   var bytes=new Uint8Array(buffer),ascii='';
@@ -146,7 +147,7 @@
                   else if(bytes[0]===0x89&&ascii.slice(1,4)==='PNG')mime='image/png';
                   else if(ascii.slice(0,4)==='RIFF'&&ascii.slice(8,12)==='WEBP')mime='image/webp';
                   if(!mime){rejectRaw(new Error(label+': file contents are not a valid JPG, PNG or WebP.'));return;}
-                  resolveRaw(result.replace(/^data:image\\/(?:jpeg|png|webp);base64,/, 'data:'+mime+';base64,'));
+                  resolveRaw('data:'+mime+';base64,'+payload);
                 }).catch(function(){rejectRaw(new Error(label+': could not read the selected image file.'));});
               }else rejectRaw(new Error(label+': your browser could not inspect the selected image.'));
             };
