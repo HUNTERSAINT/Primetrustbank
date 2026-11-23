@@ -83,7 +83,7 @@
       '<label class="field">ID expiry date<input name="id_expiry" type="date" required></label>' +
       '<label class="field">Front of ID<input name="id_front" type="file" accept="image/jpeg,image/png,image/webp" required></label>' +
       '<label class="field">Back of ID (not needed for passports)<input name="id_back" type="file" accept="image/jpeg,image/png,image/webp"></label>' +
-      '<label class="field">Selfie holding your face clearly in view<input name="selfie" type="file" accept="image/jpeg,image/png,image/webp" capture="user" required></label>' +
+      '<label class="field">Upload a selfie photo<input name="selfie" type="file" accept="image/jpeg,image/png,image/webp" required><small class="hint">Choose an existing clear photo from your device, or take a new photo and upload it. A live camera capture is not required.</small></label>' +
       '<label class="field">Proof of address (optional, unlocks higher limits)<input name="proof_address" type="file" accept="image/jpeg,image/png,image/webp"></label>' +
       '<p class="hint">Your ID number and documents are encrypted. Only authorised Prime Trust reviewers can open them.</p>';
   }
