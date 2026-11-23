@@ -667,9 +667,9 @@
       setErr(form, friendly);
       if(kind==='external-transfer'&&e.status===400){
         var msg=String(e.message||''),fieldName='';
-        if(/^SWIFT\\/BIC field:/i.test(msg))fieldName='swift_bic';
+        if(msg.indexOf('SWIFT/BIC field:')===0)fieldName='swift_bic';
         else if(/^IBAN field:/i.test(msg))fieldName='iban';
-        else if(/^IBAN \\/ Account number field:/i.test(msg))fieldName='iban';
+        else if(msg.indexOf('IBAN / Account number field:')===0)fieldName='iban';
         else if(/^Account number field:/i.test(msg))fieldName='account_number';
         else if(/bank address/i.test(msg))fieldName='bank_address';
         else if(/bank country/i.test(msg))fieldName='bank_country';
