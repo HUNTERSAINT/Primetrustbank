@@ -181,6 +181,8 @@ root.addEventListener('click',async e=>{
  try{
   if(a==='page'){setPage(b.dataset.page);return;}
   if(a==='refresh'){await go(S.page);return;}
+   if(a==='admin-notification-read'){b.disabled=true;await api('POST','/api/admin/notifications/'+encodeURIComponent(b.dataset.id)+'/read',{});notify('Notification marked as read.');await adminNotifications();return;}
+   if(a==='admin-notification-read-all'){b.disabled=true;await api('POST','/api/admin/notifications/read-all',{});notify('All notifications marked as read.');await adminNotifications();return;}
   if(a==='crypto-proof'){window.open('/api/admin/crypto-deposit/requests/'+encodeURIComponent(b.dataset.id)+'/proof','_blank','noopener');return;}
   if(a==='user'){S.userId=Number(b.dataset.id);setPage('user-detail');return;}
   if(a==='impersonate'){if(!confirm('Open this customer account as the customer? You will be able to return to admin from the customer app.'))return;const result=await api('POST','/api/admin/impersonate/'+b.dataset.id,{});notify('Opening customer session: '+result.user.full_name);window.location.href='/';return;}
