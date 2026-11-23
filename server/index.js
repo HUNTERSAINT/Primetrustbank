@@ -1307,6 +1307,20 @@ if (ADMIN_PORTAL_PATH_VALID) {
   });
 }
 
+// Keep the customer shell and dashboard bundle from being cached across UI deployments.
+app.get('/', (req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
+app.get('/app.js', (req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.sendFile(path.join(__dirname, '..', 'public', 'app.js'));
+});
+
 app.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: PROD ? '1h' : 0 }));
 
 if (require.main === module) {
