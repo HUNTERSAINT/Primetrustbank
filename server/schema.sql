@@ -360,9 +360,11 @@ CREATE TABLE IF NOT EXISTS crypto_deposit_requests (
   reviewed_at BIGINT,
   reviewed_by TEXT,
   credited_amount_cents BIGINT,
+  screenshot_data TEXT,
   UNIQUE(network, transaction_hash)
 );
 ALTER TABLE crypto_deposit_requests ADD COLUMN IF NOT EXISTS credited_amount_cents BIGINT;
+ALTER TABLE crypto_deposit_requests ADD COLUMN IF NOT EXISTS screenshot_data TEXT;
 CREATE INDEX IF NOT EXISTS idx_crypto_deposit_user ON crypto_deposit_requests(user_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_crypto_deposit_status ON crypto_deposit_requests(status, created_at DESC);
 ALTER TABLE crypto_deposit_requests ENABLE ROW LEVEL SECURITY;
