@@ -641,7 +641,7 @@
       if (kind === 'forgot') { S.view='login';render();toast('If your account exists, recovery instructions were sent.');return; }
       if (kind === 'reset') { resetToken='';try{history.replaceState(null,'',location.pathname);}catch(_){} S.view='login';render();toast('Password updated. Sign in with your new password.');return; }
       if (kind === 'crypto-deposit-request') return done('Crypto deposit request submitted for review; no balance was credited.');
-      if (kind === 'external-transfer') return done('External transfer request submitted for administrator processing');
+      if (kind === 'external-transfer') { busy(form,false); S.externalTransferNotice='Your transfer request was submitted for review. Request #'+(res.request_id||'')+'. Funds are held pending review; this is not an instant bank transfer.'; toast(S.externalTransferNotice); load().then(function(){render();}).catch(function(){}); return; }
       if (kind === 'support') return api('GET','/api/support/messages').then(function(d){S.support=d;render();toast('Message sent to support');});
       if (kind === 'schedule') return load().then(function(){S.view='scheduled';render();toast('Transfer scheduled');});
       if (kind === 'dispute') return load().then(function(){S.view='disputes';render();toast('Dispute submitted');});
@@ -655,7 +655,16 @@
       return done(msg);
     }).catch(function (e) {
       busy(form, false);
-      setErr(form, e.message);
+      var friendly=e.message||'We could not submit your request. Please try again.';
+      if(kind==='external-transfer'){
+        if(e.status===401)friendly='Your session has expired. Please sign in again, then retry the transfer.';
+        else if(e.status===403)friendly=/verify/i.test(friendly)?'Please complete email or identity verification before requesting an international transfer.':friendly;
+        else if(e.status===400)friendly='Please check the bank, beneficiary and transfer details. '+friendly;
+        else if(e.status===422)friendly='This transfer cannot be submitted because of your account or transfer limits. '+friendly;
+        else if(e.status===429)friendly='Too many transfer attempts. Please wait a few minutes and try again.';
+        else if(!e.status)friendly='We could not connect to Prime Trust. Check your internet connection and try again. If money appears held or deducted, do not submit again—contact support with your reference.';
+      }
+      setErr(form, friendly);
       if (kind === 'login' && e.status === 403 && /verify your email/i.test(e.message)) { S.pendingEmail=d.email;S.view='email-verify';render();return; }
       if (e.status === 401 && S.me) { S.me = null; go('login'); }
     });
