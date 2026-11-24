@@ -793,10 +793,10 @@
     else if (kind === 'card-replace') p=api('POST','/api/card/replace',{transaction_pin:d.transaction_pin});
     else if (kind === 'card-close') {if(!confirm('Permanently close this card? This cannot be undone.')){busy(form,false);return;}p=api('DELETE','/api/card',{transaction_pin:d.transaction_pin});}
     else if (kind === 'card-reveal') p=api('POST','/api/card/details',{pin:d.pin});
-    if (kind === 'card-request') p=api('POST','/api/card/request',{tier:d.tier,physical:d.physical==='on',pin:d.pin});
+    else if (kind === 'card-request') p=api('POST','/api/card/request',{tier:d.tier,physical:d.physical==='on',pin:d.pin});
     else if (kind === 'mfa-login') p=api('POST','/api/auth/mfa/verify',{challenge_id:mfaChallengeId,code:d.code});
     else if (kind === 'mfa-setup') p=api('POST','/api/security/mfa/confirm',{challenge_id:mfaChallengeId,code:d.code});
-    else if (kind === 'mfa-disable') p=api('POST','/api/security/mfa/disable',{password:d.password,pin:d.pin});    if (kind === 'pin-recovery-request') p=api('POST','/api/security/pin-recovery/request',{});
+    else if (kind === 'mfa-disable') p=api('POST','/api/security/mfa/disable',{password:d.password,pin:d.pin});    else if (kind === 'pin-recovery-request') p=api('POST','/api/security/pin-recovery/request',{});
     else if (kind === 'pin-recovery-confirm') p=api('POST','/api/security/pin-recovery/confirm',{challenge_id:pinResetChallengeId,code:d.code,pin:d.pin,confirm_pin:d.confirm_pin});
     else if (kind === 'forgot') p=api('POST','/api/auth/password-reset/request',{email:d.email});
     else if (kind === 'reset') {
